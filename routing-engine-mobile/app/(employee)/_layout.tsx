@@ -70,13 +70,13 @@ export default function EmployeeLayout() {
                 }}
             />
             <Tabs.Screen
-                name="settings"
+                name="report"
                 options={{
                     href: null,
                 }}
             />
             <Tabs.Screen
-                name="report"
+                name="notifications"
                 options={{
                     href: null,
                 }}

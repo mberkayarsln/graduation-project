@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { View, Text, SafeAreaView, Dimensions, TouchableOpacity, Animated, PanResponder, ScrollView, RefreshControl, Image, Alert, Linking } from 'react-native';
+import { View, Text, SafeAreaView, Dimensions, TouchableOpacity, Animated, PanResponder, ScrollView, RefreshControl, Image, Alert } from 'react-native';
 import { useRouter } from 'expo-router';
 import MapView, { Marker, Polyline } from 'react-native-maps';
 import { Ionicons } from '@expo/vector-icons';
@@ -41,6 +41,7 @@ export default function EmployeeHome() {
     const [employeeName, setEmployeeName] = useState('');
     const [menuVisible, setMenuVisible] = useState(false);
     const [notificationsEnabled, setNotificationsEnabled] = useState(false);
+    const [routeActive, setRouteActive] = useState(false);
 
     const sheetHeight = useRef(new Animated.Value(SHEET_MAX_HEIGHT)).current;
     const lastHeight = useRef(SHEET_MAX_HEIGHT);
@@ -82,9 +83,17 @@ export default function EmployeeHome() {
         setExpanded(!expanded);
     }
 
+    function refreshRouteActivity() {
+        setRouteActive(LocationStore.isActive());
+    }
+
     useEffect(() => {
         NotificationService.init().then(ok => setNotificationsEnabled(ok));
+        refreshRouteActivity();
+        const interval = setInterval(refreshRouteActivity, 3000);
         loadData();
+
+        return () => clearInterval(interval);
     }, []);
 
     async function loadData() {
@@ -266,20 +275,7 @@ export default function EmployeeHome() {
                     </TouchableOpacity>
                     <View style={{ alignItems: 'center', gap: 10 }}>
                         <TouchableOpacity
-                            onPress={() => {
-                                if (notificationsEnabled) {
-                                    Alert.alert('Notifications', 'Push notifications are enabled. You will be notified when your shuttle departs, when the driver approaches your stop, and when the trip is completed.');
-                                } else {
-                                    Alert.alert(
-                                        'Enable Notifications',
-                                        'Allow notifications to get shuttle departure and arrival alerts.',
-                                        [
-                                            { text: 'Cancel', style: 'cancel' },
-                                            { text: 'Open Settings', onPress: () => Linking.openSettings() },
-                                        ]
-                                    );
-                                }
-                            }}
+                            onPress={() => router.push('/(employee)/notifications')}
                             style={{
                                 width: 40,
                                 height: 40,
@@ -367,7 +363,15 @@ export default function EmployeeHome() {
                         {greeting}{employeeName ? `, ${employeeName.split(' ')[0]}` : ''} 👋
                     </Text>
                     <Text style={{ fontSize: 14, color: Colors.textSecondary, marginTop: 4, marginBottom: 20 }}>
-                        {loading ? 'Loading your shuttle info...' : route ? 'Your shuttle is ready' : 'No shuttle assigned yet'}
+                        {
+                            loading
+                                ? 'Loading your shuttle info...'
+                                : !route
+                                    ? 'No shuttle assigned yet'
+                                    : routeActive
+                                        ? 'Your shuttle is currently active on route'
+                                        : 'Your shuttle is ready'
+                        }
                     </Text>
 
                     {/* Pickup Stop Card */}
@@ -517,8 +521,6 @@ export default function EmployeeHome() {
                 items={[
                     { icon: 'person-outline', label: 'My Profile', onPress: () => router.push('/(employee)/profile') },
                     { icon: 'time-outline', label: 'Route History', onPress: () => router.push('/(employee)/history'), dividerAfter: true },
-                    { icon: 'warning-outline', label: 'Report an Issue', onPress: () => router.push('/(employee)/report'), dividerAfter: true },
-                    { icon: 'settings-outline', label: 'Settings', onPress: () => router.push('/(employee)/settings') },
                     { icon: 'log-out-outline', label: 'Logout', onPress: () => { AuthStore.clear(); LocationStore.clear(); router.replace('/'); } },
                 ]}
             />

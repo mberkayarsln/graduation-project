@@ -2,8 +2,7 @@ import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { View, Text, SafeAreaView, Dimensions, ActivityIndicator, ScrollView, Alert, Animated, PanResponder, TouchableOpacity } from 'react-native';
 import MapView, { Marker, Polyline } from 'react-native-maps';
 import { Ionicons } from '@expo/vector-icons';
-import { useRouter } from 'expo-router';
-import { useFocusEffect } from '@react-navigation/native';
+import { useLocalSearchParams, useRouter } from 'expo-router';
 import { Colors } from '@/constants/colors';
 import Button from '@/components/Button';
 import PassengerCard, { PassengerStatus } from '@/components/PassengerCard';
@@ -72,6 +71,7 @@ function classifyTurn(delta: number): { label: string; icon: keyof typeof Ionico
 
 export default function DriverActiveNavigation() {
     const router = useRouter();
+    const params = useLocalSearchParams<{ restartAt?: string }>();
     const [loading, setLoading] = useState(true);
     const [route, setRoute] = useState<Route | null>(null);
     const [vehicle, setVehicle] = useState<Vehicle | null>(null);
@@ -88,6 +88,31 @@ export default function DriverActiveNavigation() {
     const mapRef = useRef<MapView>(null);
     const sheetHeight = useRef(new Animated.Value(SHEET_MAX_HEIGHT)).current;
     const lastHeight = useRef(SHEET_MAX_HEIGHT);
+    const handledRestartToken = useRef<string | null>(null);
+    const autoFinishTriggered = useRef(false);
+
+    const resetTripState = useCallback((): void => {
+        setTripStarted(false);
+        setTripStartTime(new Date());
+        setShuttleIndex(0);
+        setCurrentStopIndex(0);
+        setExpanded(true);
+        setSelfConfirmedIds(new Set());
+
+        sheetHeight.setValue(SHEET_MAX_HEIGHT);
+        lastHeight.current = SHEET_MAX_HEIGHT;
+        BoardingStore.clear();
+        LocationStore.clear();
+
+        setPassengerStatuses((prev) => {
+            const next = { ...prev };
+            passengers.forEach((p) => {
+                next[p.id] = 'Waiting';
+            });
+            return next;
+        });
+        autoFinishTriggered.current = false;
+    }, [passengers, sheetHeight]);
 
     const panResponder = useRef(
         PanResponder.create({
@@ -146,22 +171,20 @@ export default function DriverActiveNavigation() {
         };
     }, []);
 
-    // Reset all trip state whenever this screen comes into focus
-    useFocusEffect(
-        useCallback(() => {
-            setTripStarted(false);
-            setTripStartTime(new Date());
-            setShuttleIndex(0);
-            setCurrentStopIndex(0);
-            setExpanded(true);
-            setSelfConfirmedIds(new Set());
+    // Load initial data once. Trip state must persist when user leaves this screen.
+    useEffect(() => {
+        loadNavigationData();
+    }, []);
 
-            sheetHeight.setValue(SHEET_MAX_HEIGHT);
-            lastHeight.current = SHEET_MAX_HEIGHT;
-            BoardingStore.clear();
-            loadNavigationData();
-        }, [])
-    );
+    // Explicit restart flow (from trip summary button).
+    useEffect(() => {
+        const token = params.restartAt;
+        if (!token || handledRestartToken.current === token) return;
+
+        handledRestartToken.current = token;
+        resetTripState();
+        loadNavigationData();
+    }, [params.restartAt, resetTripState]);
 
     // Convert route coordinates once
     const routeCoordinates = (route?.coordinates || []).map(c => ({
@@ -183,12 +206,13 @@ export default function DriverActiveNavigation() {
                 if (prev >= routeCoordinates.length - 1) return prev;
                 return prev + 1;
             });
-        }, 200);
+        }, 100);
         return () => clearInterval(interval);
     }, [tripStarted, routeCoordinates.length]);
 
     // Auto-detect arrival at stops based on simulated position
     useEffect(() => {
+        if (!tripStarted) return;
         if (routeCoordinates.length === 0 || stops.length === 0 || !route) return;
         const driverPos = routeCoordinates[shuttleIndex];
         if (!driverPos) return;
@@ -209,6 +233,9 @@ export default function DriverActiveNavigation() {
             const isLastStop = currentStopIndex >= stops.length - 1;
             if (!isLastStop) {
                 setCurrentStopIndex(prev => prev + 1);
+            } else if (!autoFinishTriggered.current) {
+                autoFinishTriggered.current = true;
+                handleArrivedAtStop();
             }
         }
     }, [shuttleIndex]);
@@ -242,6 +269,17 @@ export default function DriverActiveNavigation() {
         const dName = auth?.name || vehicle?.driver_name || route.driver_name || 'Driver';
         const vPlate = vehicle?.plate_number || route.vehicle_plate || 'N/A';
 
+        // Start each trip with a clean boarding state.
+        BoardingStore.clear();
+        setPassengerStatuses((prev) => {
+            const next = { ...prev };
+            passengers.forEach((p) => {
+                next[p.id] = 'Waiting';
+            });
+            return next;
+        });
+        setSelfConfirmedIds(new Set());
+
         // Join the route room and broadcast trip_start via Socket.IO
         SocketService.joinRoute(route.cluster_id, 'driver');
         SocketService.startTrip({
@@ -255,6 +293,7 @@ export default function DriverActiveNavigation() {
 
         setTripStartTime(new Date());
         setTripStarted(true);
+        autoFinishTriggered.current = false;
     }
 
     // Fallback: also poll BoardingStore locally (in case socket was slow)
@@ -370,6 +409,9 @@ export default function DriverActiveNavigation() {
                 boarding_status: passengerStatuses[p.id] === 'Boarded' ? 'confirmed' : passengerStatuses[p.id] === 'Absent' ? 'declined' : 'waiting',
             }));
 
+            // Ensure navigation screen starts from a clean state when revisited.
+            resetTripState();
+
             router.replace({
                 pathname: '/(driver)/trip_summary',
                 params: {
@@ -426,6 +468,9 @@ export default function DriverActiveNavigation() {
                             employee_name: p.name,
                             boarding_status: passengerStatuses[p.id] === 'Boarded' ? 'confirmed' : passengerStatuses[p.id] === 'Absent' ? 'declined' : 'waiting',
                         }));
+
+                        // Ensure navigation screen starts from a clean state when revisited.
+                        resetTripState();
 
                         router.replace({
                             pathname: '/(driver)/trip_summary',
@@ -892,12 +937,6 @@ export default function DriverActiveNavigation() {
                                 title={`Trip Complete · ${boardedCount}/${passengers.length} Boarded`}
                                 onPress={handleArrivedAtStop}
                                 icon="checkmark-circle-outline"
-                            />
-                            <Button
-                                title="Terminate Trip"
-                                onPress={handleTerminateTrip}
-                                icon="close-circle-outline"
-                                variant="outline"
                             />
                         </View>
                     ) : (

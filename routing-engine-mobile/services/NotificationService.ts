@@ -98,6 +98,26 @@ class _NotificationService {
         );
     }
 
+    /** Notify employee that the shuttle has arrived at pickup point. */
+    async driverArrived(stopName?: string): Promise<void> {
+        await this.send(
+            'Shuttle Arrived',
+            stopName
+                ? `Your shuttle has arrived at ${stopName}. Please board now.`
+                : 'Your shuttle has arrived at your pickup point. Please board now.',
+            { type: 'driver_arrived' },
+        );
+    }
+
+    /** Notify employee that shuttle reached the final stop. */
+    async destinationArrived(): Promise<void> {
+        await this.send(
+            'Destination Reached',
+            'Your shuttle has reached the final stop.',
+            { type: 'destination_arrived' },
+        );
+    }
+
     /** Notify employee that the trip has been completed. */
     async tripCompleted(): Promise<void> {
         await this.send(

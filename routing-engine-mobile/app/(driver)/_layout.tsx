@@ -6,6 +6,7 @@ import { Colors } from '@/constants/colors';
 export default function DriverLayout() {
     return (
         <Tabs
+            detachInactiveScreens={false}
             screenOptions={{
                 headerShown: false,
                 tabBarActiveTintColor: Colors.primary,
@@ -63,6 +64,12 @@ export default function DriverLayout() {
             />
             <Tabs.Screen
                 name="trip_summary"
+                options={{
+                    href: null,
+                }}
+            />
+            <Tabs.Screen
+                name="notifications"
                 options={{
                     href: null,
                 }}

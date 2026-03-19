@@ -221,11 +221,6 @@ export default function TripSummary() {
             {/* Action Buttons */}
             <View style={{ padding: 20, backgroundColor: Colors.white, borderTopWidth: 1, borderTopColor: Colors.borderLight, gap: 10 }}>
                 <Button
-                    title="Restart Route"
-                    onPress={() => router.replace('/(driver)/navigation')}
-                    icon="refresh-outline"
-                />
-                <Button
                     title="Back to Route"
                     onPress={() => router.replace('/(driver)/route')}
                     icon="arrow-back-outline"

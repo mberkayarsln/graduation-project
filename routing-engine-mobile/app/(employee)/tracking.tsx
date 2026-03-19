@@ -921,19 +921,6 @@ export default function EmployeeLiveTracking() {
                                     icon="call-outline"
                                 />
                             </View>
-                            <TouchableOpacity
-                                style={{
-                                    width: 52,
-                                    height: 52,
-                                    borderRadius: 12,
-                                    borderWidth: 1.5,
-                                    borderColor: Colors.border,
-                                    alignItems: 'center',
-                                    justifyContent: 'center',
-                                }}
-                            >
-                                <Ionicons name="chatbubble-outline" size={22} color={Colors.text} />
-                            </TouchableOpacity>
                         </View>
                     </SafeAreaView>
                 </ScrollView>

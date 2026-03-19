@@ -9,6 +9,7 @@ import SideMenu from '@/components/SideMenu';
 import { LocationStore } from '@/services/LocationStore';
 import { api } from '@/services/api';
 import { AuthStore } from '@/services/AuthStore';
+import { SocketService } from '@/services/SocketService';
 import { Route, Vehicle } from '@/services/types';
 
 export default function DriverRouteOverview() {
@@ -24,6 +25,18 @@ export default function DriverRouteOverview() {
 
     useEffect(() => {
         loadData();
+    }, []);
+
+    useEffect(() => {
+        const user = AuthStore.get();
+        if (!user || user.role !== 'driver' || user.routeClusterId == null) return;
+
+        SocketService.connect();
+        SocketService.joinRoute(user.routeClusterId, 'driver');
+
+        return () => {
+            SocketService.leaveRoute(user.routeClusterId as number);
+        };
     }, []);
 
     async function loadData() {
@@ -133,7 +146,7 @@ export default function DriverRouteOverview() {
                     <Ionicons name="menu-outline" size={26} color={Colors.text} />
                 </TouchableOpacity>
                 <Text style={{ fontSize: 17, fontWeight: '700', color: Colors.text }}>My Route</Text>
-                <TouchableOpacity>
+                <TouchableOpacity onPress={() => router.push('/(driver)/notifications')}>
                     <Ionicons name="notifications-outline" size={24} color={Colors.text} />
                 </TouchableOpacity>
             </View>
@@ -311,7 +324,6 @@ export default function DriverRouteOverview() {
                 items={[
                     { icon: 'person-outline', label: 'My Profile', onPress: () => router.push('/(driver)/profile') },
                     { icon: 'time-outline', label: 'Route History', onPress: () => router.push('/(driver)/history'), dividerAfter: true },
-                    { icon: 'settings-outline', label: 'Settings', onPress: () => { } },
                     { icon: 'log-out-outline', label: 'Logout', onPress: () => { AuthStore.clear(); LocationStore.clear(); router.replace('/'); } },
                 ]}
             />

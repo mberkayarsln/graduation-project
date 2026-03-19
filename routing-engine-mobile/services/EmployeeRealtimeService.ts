@@ -1,12 +1,18 @@
 import { AuthStore } from './AuthStore';
+import { NotificationCenter } from './NotificationCenter';
 import { NotificationService } from './NotificationService';
 import { SocketService } from './SocketService';
 
 class _EmployeeRealtimeService {
+    private static readonly APPROACHING_RADIUS_METERS = 300;
+    private static readonly ARRIVED_RADIUS_METERS = 150;
+
     private started = false;
     private joinedClusterId: number | null = null;
     private unsubscribers: (() => void)[] = [];
     private approachingNotified = false;
+    private arrivedNotified = false;
+    private destinationNotified = false;
 
     private isEmployeeSession(): boolean {
         const user = AuthStore.get();
@@ -49,6 +55,8 @@ class _EmployeeRealtimeService {
             SocketService.onTripStarted((data) => {
                 if (data.routeId !== this.joinedClusterId) return;
                 this.approachingNotified = false;
+                this.arrivedNotified = false;
+                this.destinationNotified = false;
                 NotificationService.tripStarted(data.driverName);
             })
         );
@@ -67,9 +75,42 @@ class _EmployeeRealtimeService {
                     pickup.lon
                 );
 
-                if (dist <= 300 && !this.approachingNotified) {
+                if (
+                    dist <= _EmployeeRealtimeService.APPROACHING_RADIUS_METERS &&
+                    dist > _EmployeeRealtimeService.ARRIVED_RADIUS_METERS &&
+                    !this.approachingNotified
+                ) {
                     this.approachingNotified = true;
+                    NotificationCenter.add({
+                        role: 'employee',
+                        type: 'driver_approaching',
+                        title: 'Driver Approaching',
+                        message: 'Your shuttle is getting close to your pickup point.',
+                    });
                     NotificationService.driverApproaching();
+                }
+
+                if (dist <= _EmployeeRealtimeService.ARRIVED_RADIUS_METERS && !this.arrivedNotified) {
+                    this.arrivedNotified = true;
+                    NotificationCenter.add({
+                        role: 'employee',
+                        type: 'driver_arrived',
+                        title: 'Shuttle Arrived',
+                        message: 'Your shuttle has arrived at your pickup point.',
+                    });
+                    NotificationService.driverArrived();
+                }
+
+                const reachedFinalStop = data.totalStops > 0 && data.currentStopIndex >= data.totalStops - 1;
+                if (reachedFinalStop && !this.destinationNotified) {
+                    this.destinationNotified = true;
+                    NotificationCenter.add({
+                        role: 'employee',
+                        type: 'destination_arrived',
+                        title: 'Destination Reached',
+                        message: 'Your shuttle reached the final stop.',
+                    });
+                    NotificationService.destinationArrived();
                 }
             })
         );
@@ -78,6 +119,8 @@ class _EmployeeRealtimeService {
             SocketService.onTripEnded((data) => {
                 if (data.routeId !== this.joinedClusterId) return;
                 this.approachingNotified = false;
+                this.arrivedNotified = false;
+                this.destinationNotified = false;
                 NotificationService.tripCompleted();
             })
         );
@@ -95,6 +138,8 @@ class _EmployeeRealtimeService {
         this.started = false;
         this.joinedClusterId = null;
         this.approachingNotified = false;
+        this.arrivedNotified = false;
+        this.destinationNotified = false;
     }
 }
 

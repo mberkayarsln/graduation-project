@@ -11,6 +11,7 @@
  */
 
 import { io, Socket } from 'socket.io-client';
+import { NotificationCenter } from './NotificationCenter';
 
 const SOCKET_URL = 'http://localhost:5050';
 
@@ -65,6 +66,7 @@ class _SocketService {
     private socket: Socket | null = null;
     private _connected = false;
     private _currentRoom: string | null = null;
+    private _currentRole: 'driver' | 'employee' | null = null;
 
     // Listener registries
     private tripStartedListeners: TripStartedListener[] = [];
@@ -74,9 +76,29 @@ class _SocketService {
     private boardingCheckListeners: BoardingCheckListener[] = [];
     private connectionListeners: ConnectionListener[] = [];
 
+    private addNotificationForRole(
+        role: 'employee' | 'driver',
+        input: {
+            type: 'trip_started' | 'trip_ended' | 'boarding_changed' | 'boarding_check' | 'system';
+            title: string;
+            message: string;
+        }
+    ): void {
+        const sessionRole = NotificationCenter.inferRoleFromSession();
+        if (sessionRole !== role) return;
+
+        NotificationCenter.add({
+            role,
+            type: input.type,
+            title: input.title,
+            message: input.message,
+        });
+    }
+
     /** Connect to the Socket.IO server (idempotent). */
     connect(): void {
-        if (this.socket?.connected) return;
+        // If a socket instance already exists, let Socket.IO manage reconnection.
+        if (this.socket) return;
 
         this.socket = io(SOCKET_URL, {
             transports: ['websocket', 'polling'],
@@ -91,12 +113,32 @@ class _SocketService {
             console.log('[Socket] Connected:', this.socket?.id);
             this._connected = true;
             this.connectionListeners.forEach(fn => fn(true));
+
+            const role = NotificationCenter.inferRoleFromSession();
+            if (role) {
+                NotificationCenter.add({
+                    role,
+                    type: 'system',
+                    title: 'Connected',
+                    message: 'Live updates are now active.',
+                });
+            }
         });
 
         this.socket.on('disconnect', () => {
             console.log('[Socket] Disconnected');
             this._connected = false;
             this.connectionListeners.forEach(fn => fn(false));
+
+            const role = NotificationCenter.inferRoleFromSession();
+            if (role) {
+                NotificationCenter.add({
+                    role,
+                    type: 'system',
+                    title: 'Disconnected',
+                    message: 'Live updates paused. Reconnecting...',
+                });
+            }
         });
 
         this.socket.on('connect_error', (err) => {
@@ -106,6 +148,12 @@ class _SocketService {
         // Real-time events from server
         this.socket.on('trip_started', (data: TripUpdatePayload) => {
             console.log('[Socket] trip_started', data.routeId);
+            // Employee-facing event: shuttle started.
+            this.addNotificationForRole('employee', {
+                type: 'trip_started',
+                title: 'Trip Started',
+                message: `Route ${data.routeId} has started${data.driverName ? ` by ${data.driverName}` : ''}.`,
+            });
             this.tripStartedListeners.forEach(fn => fn(data));
         });
 
@@ -115,16 +163,34 @@ class _SocketService {
 
         this.socket.on('trip_ended', (data: TripEndedPayload) => {
             console.log('[Socket] trip_ended', data.routeId);
+            // Employee-facing event: shuttle trip completed.
+            this.addNotificationForRole('employee', {
+                type: 'trip_ended',
+                title: 'Trip Completed',
+                message: `Route ${data.routeId} has ended.`,
+            });
             this.tripEndedListeners.forEach(fn => fn(data));
         });
 
         this.socket.on('boarding_changed', (data: BoardingChangedPayload) => {
             console.log('[Socket] boarding_changed', data.employeeId, data.status);
+            // Driver-facing event: passenger boarding status changed.
+            this.addNotificationForRole('driver', {
+                type: 'boarding_changed',
+                title: 'Boarding Update',
+                message: `Passenger #${data.employeeId} marked as ${data.status}.`,
+            });
             this.boardingChangedListeners.forEach(fn => fn(data));
         });
 
         this.socket.on('boarding_check_started', (data: BoardingCheckPayload) => {
             console.log('[Socket] boarding_check_started at stop', data.stopIndex);
+            // Employee-facing event: boarding check started at stop.
+            this.addNotificationForRole('employee', {
+                type: 'boarding_check',
+                title: 'Boarding Check',
+                message: `${data.stopName} stop check started.`,
+            });
             this.boardingCheckListeners.forEach(fn => fn(data));
         });
     }
@@ -150,14 +216,27 @@ class _SocketService {
 
     /** Join a route room to send/receive events for that route. */
     joinRoute(routeId: number, role: 'driver' | 'employee'): void {
+        const targetRoom = `route_${routeId}`;
+
+        // Avoid duplicate join emits for the same route/role pair.
+        if (this._currentRoom === targetRoom && this._currentRole === role) return;
+
+        // If switching route/role, leave previous room first.
+        if (this._currentRoom && this._currentRoom !== targetRoom) {
+            const previousRouteId = parseInt(this._currentRoom.replace('route_', ''), 10);
+            this.leaveRoute(previousRouteId);
+        }
+
         this.socket?.emit('join_route', { routeId, role });
-        this._currentRoom = `route_${routeId}`;
+        this._currentRoom = targetRoom;
+        this._currentRole = role;
     }
 
     /** Leave the route room. */
     leaveRoute(routeId: number): void {
         this.socket?.emit('leave_route', { routeId });
         this._currentRoom = null;
+        this._currentRole = null;
     }
 
     // ------------------------------------------------------------------
