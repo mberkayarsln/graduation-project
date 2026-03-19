@@ -1,6 +1,5 @@
 import { NavLink, Outlet } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
-import { setLanguage } from '../i18n';
 import { useState } from 'react';
 import ToastContainer from './Toast';
 
@@ -14,10 +13,8 @@ const navItems = [
 ];
 
 export default function Layout() {
-  const { t, i18n } = useTranslation();
-  const [langOpen, setLangOpen] = useState(false);
+  const { t } = useTranslation();
   const [sidebarOpen, setSidebarOpen] = useState(false);
-  const currentLang = i18n.language;
 
   return (
     <div className={`page-wrapper${sidebarOpen ? ' sidebar-open' : ''}`} id="main-wrapper">
@@ -50,26 +47,6 @@ export default function Layout() {
               ))}
             </ul>
           </nav>
-
-          <div className="sidebar-footer">
-            <details className="lang-dropdown" open={langOpen} onToggle={(e) => setLangOpen((e.target as HTMLDetailsElement).open)}>
-              <summary className="lang-toggle">
-                <span className={`flag flag-${currentLang}`} aria-hidden="true" />
-                <span className="lang-code">{currentLang.toUpperCase()}</span>
-                <i className="ti ti-chevron-down" />
-              </summary>
-              <div className="lang-menu">
-                <button className={`lang-item${currentLang === 'tr' ? ' active' : ''}`} onClick={() => { setLanguage('tr'); setLangOpen(false); }}>
-                  <span className="flag flag-tr" aria-hidden="true" />
-                  <span>{t('lang_name_tr')}</span>
-                </button>
-                <button className={`lang-item${currentLang === 'en' ? ' active' : ''}`} onClick={() => { setLanguage('en'); setLangOpen(false); }}>
-                  <span className="flag flag-en" aria-hidden="true" />
-                  <span>{t('lang_name_en')}</span>
-                </button>
-              </div>
-            </details>
-          </div>
         </div>
       </aside>
 

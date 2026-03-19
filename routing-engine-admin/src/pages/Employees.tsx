@@ -14,17 +14,12 @@ export default function Employees() {
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState('all');
   const [selected, setSelected] = useState<Set<number>>(new Set());
-  const [modalEmp, setModalEmp] = useState<Employee | null>(null);
-  const [editExcluded, setEditExcluded] = useState(false);
-  const [editReason, setEditReason] = useState('');
   const [loading, setLoading] = useState(true);
 
   const mapRef = useRef<L.Map | null>(null);
   const mapContainerRef = useRef<HTMLDivElement>(null);
   const markerLayerRef = useRef<L.LayerGroup | null>(null);
   const markersRef = useRef<Record<number, L.Marker>>({});
-  const modalMapRef = useRef<L.Map | null>(null);
-  const modalMapContainerRef = useRef<HTMLDivElement>(null);
 
   const initMap = useCallback(() => {
     if (mapRef.current || !mapContainerRef.current) return;
@@ -127,32 +122,6 @@ export default function Employees() {
     setSelected(new Set([empId]));
   };
 
-  const openModal = (emp: Employee) => {
-    setModalEmp(emp);
-    setEditExcluded(emp.excluded);
-    setEditReason(emp.exclusion_reason || '');
-    setTimeout(() => {
-      if (modalMapRef.current) modalMapRef.current.remove();
-      if (!modalMapContainerRef.current) return;
-      const m = L.map(modalMapContainerRef.current).setView([emp.lat, emp.lon], 15);
-      L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png').addTo(m);
-      L.marker([emp.lat, emp.lon]).addTo(m).bindPopup('Home').openPopup();
-      if (emp.pickup_point) {
-        L.marker(emp.pickup_point, {
-          icon: L.divIcon({ className: 'pickup-marker', html: '<div style="background:#10b981;width:10px;height:10px;border-radius:50%;border:2px solid #fff;"></div>', iconSize: [10, 10] }),
-        }).addTo(m).bindPopup('Pickup');
-      }
-      modalMapRef.current = m;
-    }, 100);
-  };
-
-  const saveModal = async () => {
-    if (!modalEmp) return;
-    await employeesApi.update(modalEmp.id, { excluded: editExcluded, exclusion_reason: editReason });
-    setModalEmp(null);
-    loadEmployees();
-  };
-
   return (
     <>
       <div className="page-title-bar">
@@ -233,9 +202,6 @@ export default function Employees() {
                           : <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" /></svg>
                         }
                       </button>
-                      <button className="btn-icon" onClick={(ev) => { ev.stopPropagation(); openModal(e); }} title={t('btn_edit')}>
-                        <i className="ti ti-pencil" style={{ fontSize: 14 }} />
-                      </button>
                     </td>
                   </tr>
                 ))
@@ -244,41 +210,6 @@ export default function Employees() {
           </table>
         </div>
       </div>
-
-      {/* Edit Modal */}
-      {modalEmp && (
-        <div className="modal" style={{ display: 'flex' }} onClick={() => setModalEmp(null)}>
-          <div className="modal-content" onClick={(e) => e.stopPropagation()}>
-            <div className="modal-header">
-              <h3>{t('modal_edit_title')}: {modalEmp.name}</h3>
-              <button className="modal-close" onClick={() => setModalEmp(null)}>&times;</button>
-            </div>
-            <div className="modal-body">
-              <div ref={modalMapContainerRef} style={{ height: 300, borderRadius: 12, marginBottom: 20 }} />
-              <div className="form-group">
-                <label>{t('lbl_status')}</label>
-                <div className="toggle-group">
-                  <label className="toggle">
-                    <input type="checkbox" checked={editExcluded} onChange={(e) => setEditExcluded(e.target.checked)} />
-                    <span className="toggle-slider" />
-                    <span className="toggle-label">{t('lbl_excluded_svc')}</span>
-                  </label>
-                </div>
-              </div>
-              {editExcluded && (
-                <div className="form-group">
-                  <label>{t('lbl_reason')}</label>
-                  <input type="text" value={editReason} onChange={(e) => setEditReason(e.target.value)} placeholder={t('ph_reason')} />
-                </div>
-              )}
-              <div className="form-actions" style={{ display: 'flex', gap: 12, justifyContent: 'flex-end' }}>
-                <button className="btn btn-secondary" onClick={() => setModalEmp(null)}>{t('btn_cancel')}</button>
-                <button className="btn btn-primary" onClick={saveModal}>{t('btn_save')}</button>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
     </>
   );
 }

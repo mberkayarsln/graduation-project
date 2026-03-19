@@ -62,22 +62,48 @@ export default function VehiclesPage() {
       </div>
 
       <div className="page-content">
-        <div className="vehicles-grid">
-          {loading ? (
-            <SkeletonLoader variant="vehicle-card" count={6} />
-          ) : vehicles.length === 0 ? (
-            <div style={{ gridColumn: '1/-1', textAlign: 'center', padding: 40, color: 'var(--text-muted)' }}>{t('msg_no_veh')}</div>
-          ) : vehicles.map((v) => (
-            <div key={v.id} className="vehicle-card" onClick={() => openEdit(v)} style={{ cursor: 'pointer' }}>
-              <div className="vehicle-icon"><i className="ti ti-bus" /></div>
-              <div className="vehicle-name">{v.driver_name || <span style={{ color: 'var(--text-muted)' }}>{t('lbl_unassigned')}</span>}</div>
-              <div className="vehicle-type">{v.vehicle_type}</div>
-              <div className="vehicle-capacity">
-                <span>{t('lbl_capacity_upper')}</span>
-                <span>{v.capacity} {t('unit_seats')}</span>
-              </div>
-            </div>
-          ))}
+        <div className="table-card">
+          <table className="data-table">
+            <thead>
+              <tr>
+                <th>{t('tbl_id')}</th>
+                <th>{t('lbl_driver_name')}</th>
+                <th>{t('tbl_plate')}</th>
+                <th>{t('tbl_type')}</th>
+                <th>{t('lbl_capacity')}</th>
+                <th>{t('tbl_actions')}</th>
+              </tr>
+            </thead>
+            <tbody>
+              {loading ? (
+                <SkeletonLoader variant="table-row" count={8} />
+              ) : vehicles.length === 0 ? (
+                <tr>
+                  <td colSpan={6} className="empty">{t('msg_no_veh')}</td>
+                </tr>
+              ) : vehicles.map((v) => (
+                <tr key={v.id} onClick={() => openEdit(v)} style={{ cursor: 'pointer' }}>
+                  <td>{v.id}</td>
+                  <td>{v.driver_name || <span style={{ color: 'var(--text-muted)' }}>{t('lbl_unassigned')}</span>}</td>
+                  <td>{v.plate_number || '-'}</td>
+                  <td>{v.vehicle_type || '-'}</td>
+                  <td>{v.capacity} {t('unit_seats')}</td>
+                  <td>
+                    <button
+                      className="btn-icon"
+                      onClick={(ev) => {
+                        ev.stopPropagation();
+                        openEdit(v);
+                      }}
+                      title={t('modal_veh_title')}
+                    >
+                      <i className="ti ti-pencil" style={{ fontSize: 14 }} />
+                    </button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
         </div>
       </div>
 

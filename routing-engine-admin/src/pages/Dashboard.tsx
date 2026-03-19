@@ -142,27 +142,25 @@ export default function Dashboard() {
 
       <div className="page-content">
         <div className="dashboard-layout">
-          <div>
-            <div className="card" style={{ marginBottom: 0 }}>
-              <div ref={mapContainerRef} style={{ height: 600, borderRadius: 12, zIndex: 1 }} />
-            </div>
+          <div className="card" style={{ marginBottom: 0 }}>
+            <div ref={mapContainerRef} style={{ height: 600, borderRadius: 12, zIndex: 1 }} />
           </div>
+        </div>
 
-          <div>
-            <div className="section-label">{t('lbl_ops_summary')}</div>
-            <div className="stats-grid">
-              {stats ? statCards.map((s, i) => (
-                <div className="stat-card" key={i}>
-                  <div className="stat-info">
-                    <div className="stat-icon" style={{ background: s.bg, color: s.color }}>
-                      <i className={`ti ${s.icon}`} />
-                    </div>
-                    <span className="stat-label">{s.label}</span>
+        <div style={{ marginTop: 18 }}>
+          <div className="section-label">{t('lbl_ops_summary')}</div>
+          <div className="stats-grid dashboard-stats-row">
+            {stats ? statCards.map((s, i) => (
+              <div className="stat-card" key={i}>
+                <div className="stat-info">
+                  <div className="stat-icon" style={{ background: s.bg, color: s.color }}>
+                    <i className={`ti ${s.icon}`} />
                   </div>
-                  <span className="stat-value">{s.value}</span>
+                  <span className="stat-label">{s.label}</span>
                 </div>
-              )) : <SkeletonLoader variant="stat-card" count={10} />}
-            </div>
+                <span className="stat-value">{s.value}</span>
+              </div>
+            )) : <SkeletonLoader variant="stat-card" count={10} />}
           </div>
         </div>
       </div>

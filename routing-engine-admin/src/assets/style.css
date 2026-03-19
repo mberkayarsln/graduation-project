@@ -492,7 +492,7 @@ body {
 }
 
 .stat-value {
-    font-size: 18px;
+    font-size: 16px;
     font-weight: 700;
     color: var(--text-primary);
     line-height: 1.1;
@@ -1134,6 +1134,13 @@ select:focus {
    ============================================================================= */
 
 .modal {
+    position: fixed;
+    inset: 0;
+    z-index: 1000;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 20px;
     background-color: rgba(0, 0, 0, 0.5);
 }
 
@@ -1142,6 +1149,45 @@ select:focus {
     border: 1px solid var(--border-color);
     border-radius: 12px;
     box-shadow: 0 8px 24px rgba(0, 0, 0, 0.15);
+    width: min(920px, calc(100vw - 40px));
+    max-height: calc(100vh - 40px);
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+}
+
+.modal-header {
+    padding: 20px 24px;
+    border-bottom: 1px solid var(--border-light);
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.modal-header h3 {
+    margin: 0;
+    font-size: 20px;
+    font-weight: 700;
+    color: var(--text-primary);
+}
+
+.modal-close {
+    background: transparent;
+    border: none;
+    color: var(--text-muted);
+    font-size: 28px;
+    line-height: 1;
+    cursor: pointer;
+    padding: 0;
+}
+
+.modal-close:hover {
+    color: var(--text-primary);
+}
+
+.modal-body {
+    padding: 20px 24px 24px;
+    overflow-y: auto;
 }
 
 /* =============================================================================
@@ -1162,10 +1208,30 @@ select:focus {
 
 /* Dashboard layout: map + stats sidebar */
 .dashboard-layout {
+    display: block;
+}
+
+.dashboard-stats-row {
     display: grid;
-    grid-template-columns: 1fr 320px;
-    gap: 24px;
-    align-items: start;
+    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+    gap: 12px;
+    overflow: visible;
+    border: none;
+    background: transparent;
+    border-radius: 0;
+    padding: 2px 2px 8px;
+}
+
+.dashboard-stats-row .stat-card {
+    min-width: 0;
+    border: 1px solid var(--border-color);
+    border-radius: 12px;
+    background-color: var(--bg-card);
+    border-bottom: 1px solid var(--border-color);
+}
+
+.dashboard-stats-row .stat-card:last-child {
+    border-bottom: 1px solid var(--border-color);
 }
 
 .section-label {
@@ -1402,11 +1468,17 @@ select:focus {
     }
 
     .dashboard-layout {
-        grid-template-columns: 1fr;
+        display: block;
     }
 
     .cr-summary-grid {
         grid-template-columns: 1fr 1fr;
+    }
+}
+
+@media (max-width: 720px) {
+    .dashboard-stats-row {
+        grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
     }
 }
 

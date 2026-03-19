@@ -4,8 +4,8 @@ import { jsPDF } from 'jspdf';
 import { getCostReport } from '../services/api';
 import type { CostReportData } from '../services/api';
 
-const fmt = (n: number) => new Intl.NumberFormat('tr-TR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(n);
-const fmtInt = (n: number) => new Intl.NumberFormat('tr-TR').format(n);
+const fmt = (n: number) => new Intl.NumberFormat('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(n);
+const fmtInt = (n: number) => new Intl.NumberFormat('en-US').format(n);
 
 // jsPDF'in varsayilan fontlari Turkce karakterlerin tamamini desteklemedigi icin
 // export metinlerini PDF-guvenli Latin karakterlere normalize ediyoruz.
@@ -112,7 +112,7 @@ export default function CostReportPage() {
     y += 7;
     doc.setFont('helvetica', 'normal');
     doc.setFontSize(9);
-    doc.text(toPdfSafeText(`${t('rpt_date')}: ${new Date().toLocaleDateString('tr-TR')}`), margin, y);
+    doc.text(toPdfSafeText(`${t('rpt_date')}: ${new Date().toLocaleDateString('en-US')}`), margin, y);
     y += 6;
 
     addSection(t('card_breakdown'));
@@ -121,10 +121,10 @@ export default function CostReportPage() {
     addLine(t('lbl_st_routes'), fmtInt(data.system.route_count));
     addLine(t('lbl_st_daily_km'), fmt(data.system.daily_km));
     addLine(t('lbl_st_monthly_km'), fmt(data.system.monthly_km));
-    addLine('Aylik Sefer Sayisi', fmtInt(data.system.monthly_trip_count));
+    addLine('Monthly Trip Count', fmtInt(data.system.monthly_trip_count));
 
     addSection(t('sect_personnel'));
-    addLine('Etkin Surucu Sayisi', fmtInt(data.breakdown.driver.effective_driver_count));
+    addLine('Effective Driver Count', fmtInt(data.breakdown.driver.effective_driver_count));
     addLine(t('lbl_driver_salary'), `TL ${fmt(data.breakdown.driver.gross_salary * data.breakdown.driver.effective_driver_count)}`);
     addLine(t('lbl_sgk'), `TL ${fmt(data.breakdown.driver.sgk_per_driver * data.breakdown.driver.effective_driver_count)}`);
     addLine(t('lbl_unemployment'), `TL ${fmt(data.breakdown.driver.unemployment_per_driver * data.breakdown.driver.effective_driver_count)}`);
@@ -134,17 +134,17 @@ export default function CostReportPage() {
     addLine(t('lbl_vehicle_rent'), `TL ${fmt(data.breakdown.vehicle.rent_total)}`);
     addLine(t('lbl_maintenance'), `TL ${fmt(data.breakdown.vehicle.maintenance_total)}`);
     addLine(t('lbl_mtv'), `TL ${fmt(data.breakdown.vehicle.mtv_total)}`);
-    addLine('Sigorta (ay/arac)', `TL ${fmt(data.breakdown.vehicle.insurance_total)}`);
-    addLine('Lastik (ay/arac)', `TL ${fmt(data.breakdown.vehicle.tyre_total)}`);
+    addLine('Insurance (monthly/vehicle)', `TL ${fmt(data.breakdown.vehicle.insurance_total)}`);
+    addLine('Tyre (monthly/vehicle)', `TL ${fmt(data.breakdown.vehicle.tyre_total)}`);
     addLine(t('row_vehicle_total'), `TL ${fmt(data.breakdown.vehicle.total)}`);
 
     addSection(t('sect_fuel'));
     addLine(t('row_fuel_monthly'), `TL ${fmt(data.breakdown.fuel.total)}`);
-    addLine('Kopru/Otoyol Gideri', `TL ${fmt(data.breakdown.toll.total)}`);
-    addLine('Diger Degisken Gider', `TL ${fmt(data.breakdown.misc_variable.total)}`);
-    addLine('Toplam Degisken Gider', `TL ${fmt(data.breakdown.variable_total)}`);
+    addLine('Bridge/Highway Cost', `TL ${fmt(data.breakdown.toll.total)}`);
+    addLine('Other Variable Cost', `TL ${fmt(data.breakdown.misc_variable.total)}`);
+    addLine('Total Variable Cost', `TL ${fmt(data.breakdown.variable_total)}`);
     
-    addSection('Maliyet ve Kar Ozeti');
+    addSection('Cost and Profit Summary');
     addLine(t('row_subtotal'), `TL ${fmt(data.breakdown.subtotal)}`);
     addLine(t('row_net_cost'), `TL ${fmt(data.breakdown.net_cost)}`);
     addLine(t('row_pre_tax'), `TL ${fmt(data.breakdown.pre_tax_total)}`);
@@ -155,14 +155,14 @@ export default function CostReportPage() {
     addLine(t('row_contract_val'), `TL ${fmt(data.contract.contract_value)}`);
     addLine(t('row_offer_total'), `TL ${fmt(data.contract.final_total)}`);
     addLine(t('row_cost_per_km'), `TL ${fmt(data.contract.per_km)}`);
-    addLine('Sefer Basi Maliyet', `TL ${fmt(data.contract.per_trip)}`);
+    addLine('Cost Per Trip', `TL ${fmt(data.contract.per_trip)}`);
 
     if (data.sensitivity) {
-      addSection('Duyarlilik Analizi');
+      addSection('Sensitivity Analysis');
       const s = data.sensitivity;
-      addLine('Yakit +%10 (Delta)', `TL ${fmt(s.fuel_delta)}`);
-      addLine('Sofor +%10 (Delta)', `TL ${fmt(s.salary_delta)}`);
-      addLine('KM +%10 (Delta)', `TL ${fmt(s.km_delta)}`);
+      addLine('Fuel +10% (Delta)', `TL ${fmt(s.fuel_delta)}`);
+      addLine('Driver Cost +10% (Delta)', `TL ${fmt(s.salary_delta)}`);
+      addLine('KM +10% (Delta)', `TL ${fmt(s.km_delta)}`);
     }
 
     doc.save(`service-cost-report-${new Date().toISOString().slice(0, 10)}.pdf`);
