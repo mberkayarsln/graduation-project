@@ -312,7 +312,6 @@ export default function DriverRouteOverview() {
                     { icon: 'person-outline', label: 'My Profile', onPress: () => router.push('/(driver)/profile') },
                     { icon: 'time-outline', label: 'Route History', onPress: () => router.push('/(driver)/history'), dividerAfter: true },
                     { icon: 'settings-outline', label: 'Settings', onPress: () => { } },
-                    { icon: 'help-circle-outline', label: 'Help & FAQ', onPress: () => { }, dividerAfter: true },
                     { icon: 'log-out-outline', label: 'Logout', onPress: () => { AuthStore.clear(); LocationStore.clear(); router.replace('/'); } },
                 ]}
             />

@@ -519,8 +519,6 @@ export default function EmployeeHome() {
                     { icon: 'time-outline', label: 'Route History', onPress: () => router.push('/(employee)/history'), dividerAfter: true },
                     { icon: 'warning-outline', label: 'Report an Issue', onPress: () => router.push('/(employee)/report'), dividerAfter: true },
                     { icon: 'settings-outline', label: 'Settings', onPress: () => router.push('/(employee)/settings') },
-                    { icon: 'help-circle-outline', label: 'Help & FAQ', onPress: () => router.push('/(employee)/help') },
-                    { icon: 'information-circle-outline', label: 'About', onPress: () => router.push('/(employee)/about'), dividerAfter: true },
                     { icon: 'log-out-outline', label: 'Logout', onPress: () => { AuthStore.clear(); LocationStore.clear(); router.replace('/'); } },
                 ]}
             />

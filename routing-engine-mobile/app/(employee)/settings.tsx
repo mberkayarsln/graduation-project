@@ -42,13 +42,6 @@ export default function SettingsScreen() {
                         </View>
                         <Switch value={shuttleAlerts} onValueChange={setShuttleAlerts} trackColor={{ true: Colors.primary }} />
                     </View>
-                    <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 16, paddingVertical: 14 }}>
-                        <View style={{ flexDirection: 'row', alignItems: 'center', flex: 1 }}>
-                            <Ionicons name="alert-circle-outline" size={20} color={Colors.textSecondary} />
-                            <Text style={{ fontSize: 15, color: Colors.text, marginLeft: 12 }}>Delay Notifications</Text>
-                        </View>
-                        <Switch value={delayAlerts} onValueChange={setDelayAlerts} trackColor={{ true: Colors.primary }} />
-                    </View>
                 </View>
 
                 {/* Appearance Section */}
