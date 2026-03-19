@@ -1,0 +1,1328 @@
+"""
+Flask Web Application for Routing Engine Management.
+
+Provides a REST API and web interface for managing:
+- Employees
+- Routes
+- Clusters
+- Vehicles
+- Schedules
+"""
+import os
+import sys
+import math
+
+# Add parent directory to path for imports
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+from flask import Flask, jsonify, request, send_from_directory
+from flask_cors import CORS
+from flask_socketio import SocketIO, emit, join_room, leave_room
+from dotenv import load_dotenv
+
+load_dotenv()
+
+from db.connection import Database
+from db.repositories import (
+    ZoneRepository, EmployeeRepository, ClusterRepository,
+    RouteRepository, VehicleRepository, TripHistoryRepository
+)
+
+# Path to React SPA build output
+SPA_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), '..', 'routing-engine-admin', 'dist')
+SPA_DIR = os.path.abspath(SPA_DIR)
+
+app = Flask(__name__, static_folder=os.path.join(SPA_DIR, 'assets'), static_url_path='/assets')
+app.config['SECRET_KEY'] = os.getenv('SECRET_KEY', 'dev-secret-key')
+CORS(app)
+socketio = SocketIO(app, cors_allowed_origins='*', async_mode='eventlet')
+
+# Initialize database and repositories
+db = Database()
+zone_repo = ZoneRepository(db)
+employee_repo = EmployeeRepository(db)
+cluster_repo = ClusterRepository(db)
+route_repo = RouteRepository(db)
+vehicle_repo = VehicleRepository(db)
+trip_history_repo = TripHistoryRepository(db)
+
+# Cache for transit stops to avoid reloading OSM data on every request
+_transit_stops_cache: list[tuple[float, float]] | None = None
+_transit_stop_names_cache: dict[tuple[float, float], str] | None = None
+_bus_stops_cache: dict[int, list] = {}  # cluster_id -> bus_stops along route
+
+
+def _get_transit_stops_cached() -> list[tuple[float, float]]:
+    global _transit_stops_cache
+    if _transit_stops_cache is None:
+        from utils import DataGenerator
+        data_gen = DataGenerator()
+        _transit_stops_cache = data_gen.get_transit_stops()
+    return _transit_stops_cache
+
+
+def _get_transit_stop_names_cached() -> dict[tuple[float, float], str]:
+    global _transit_stop_names_cache
+    if _transit_stop_names_cache is None:
+        from utils import DataGenerator
+        data_gen = DataGenerator()
+        _transit_stop_names_cache = data_gen.get_transit_stops_with_names()
+    return _transit_stop_names_cache
+
+
+def _warm_caches():
+    """Pre-load heavy OSM caches at startup so first request is fast."""
+    import threading
+    def _do():
+        print("[Cache] Pre-warming transit stops...")
+        _get_transit_stops_cached()
+        _get_transit_stop_names_cached()
+        print(f"[Cache] Ready — {len(_transit_stops_cache or [])} stops, {len(_transit_stop_names_cache or {})} named stops")
+    threading.Thread(target=_do, daemon=True).start()
+
+
+_warm_caches()
+
+
+# =============================================================================
+# SPA Serving - React Admin Panel
+# =============================================================================
+
+@app.route('/')
+@app.route('/employees')
+@app.route('/routes')
+@app.route('/routes/edit')
+@app.route('/clusters')
+@app.route('/vehicles')
+@app.route('/cost-report')
+def serve_spa(**kwargs):
+    """Serve React SPA index.html for all frontend routes."""
+    return send_from_directory(SPA_DIR, 'index.html')
+
+
+# =============================================================================
+# REST API - Authentication
+# =============================================================================
+
+@app.route('/api/auth/login', methods=['POST'])
+def api_login():
+    """Authenticate an employee or driver by name/ID.
+    
+    Body: { "role": "employee"|"driver", "identifier": "<name or numeric id>" }
+    Drivers can also be identified by their vehicle plate or driver_name.
+    """
+    try:
+        data = request.json or {}
+        role = data.get('role', 'employee')
+        identifier = str(data.get('identifier', '')).strip()
+
+        if role == 'employee':
+            emp = None
+
+            # Try numeric ID first
+            if identifier.isdigit():
+                emp = employee_repo.find_by_id(int(identifier))
+
+            # Fall back to name search (case-insensitive, partial match)
+            if not emp and identifier:
+                query = """
+                    SELECT id, full_name, zone_id, cluster_id, is_excluded, exclusion_reason,
+                           ST_AsText(home_location) AS home_location_wkt,
+                           ST_AsText(pickup_point)  AS pickup_point_wkt
+                    FROM employees
+                    WHERE LOWER(full_name) LIKE LOWER(%s)
+                      AND deleted_at IS NULL
+                    ORDER BY id
+                    LIMIT 1
+                """
+                rows = db.fetchall(query, (f'%{identifier}%',))
+                if rows:
+                    emp = employee_repo.to_model(rows[0])
+
+            if not emp:
+                return jsonify({'success': False, 'error': 'Employee not found. Try your Employee ID number.'}), 404
+
+            return jsonify({
+                'success': True,
+                'role': 'employee',
+                'id': emp.id,
+                'name': emp.name or f'Employee {emp.id}',
+                'email': f'employee{emp.id}@company.com',
+                'lat': emp.lat,
+                'lon': emp.lon,
+                'cluster_id': emp.cluster_id,
+                'pickup_point': list(emp.pickup_point) if emp.pickup_point else None,
+                'zone_id': emp.zone_id,
+                'excluded': emp.excluded,
+            })
+
+        elif role == 'driver':
+            vehicle = None
+
+            # Try numeric vehicle ID first
+            if identifier.isdigit():
+                vehicle = vehicle_repo.find_by_id(int(identifier))
+
+            # Search by driver_name or plate_number
+            if not vehicle and identifier:
+                all_vehicles = vehicle_repo.find_all()
+                vehicle = next(
+                    (v for v in all_vehicles
+                     if (v.driver_name and identifier.lower() in v.driver_name.lower())),
+                    None
+                )
+                if not vehicle:
+                    # Try plate number
+                    query = """
+                        SELECT id, plate_number, driver_name, driver_phone, capacity, vehicle_type, status
+                        FROM vehicles
+                        WHERE LOWER(plate_number) LIKE LOWER(%s) AND deleted_at IS NULL
+                        LIMIT 1
+                    """
+                    rows = db.fetchall(query, (f'%{identifier}%',))
+                    if rows:
+                        vehicle = vehicle_repo.to_model(rows[0])
+
+            # If still not found but vehicles exist, reject — don't silently pick a wrong vehicle
+            if not vehicle:
+                return jsonify({'success': False, 'error': 'Driver or vehicle not found. Try your Vehicle ID.'}), 404
+
+            # Find the cluster this vehicle is assigned to
+            route_cluster_id = None
+            try:
+                route_row = db.fetchone(
+                    "SELECT cluster_id FROM routes WHERE vehicle_id = %s AND deleted_at IS NULL LIMIT 1",
+                    (vehicle.id,)
+                )
+                if route_row:
+                    route_cluster_id = route_row['cluster_id']
+            except Exception:
+                pass
+
+            return jsonify({
+                'success': True,
+                'role': 'driver',
+                'id': vehicle.id,
+                'name': getattr(vehicle, 'driver_name', None) or f'Driver {vehicle.id}',
+                'email': f'driver{vehicle.id}@company.com',
+                'vehicle_id': vehicle.id,
+                'vehicle_type': vehicle.vehicle_type,
+                'vehicle_capacity': vehicle.capacity,
+                'route_cluster_id': route_cluster_id,
+            })
+
+        return jsonify({'success': False, 'error': 'Invalid role. Use "employee" or "driver".'}), 400
+
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+# =============================================================================
+# REST API - Statistics
+# =============================================================================
+
+@app.route('/api/stats')
+def api_stats():
+    """Get dashboard statistics."""
+    try:
+        employees = employee_repo.find_all()
+        clusters = cluster_repo.find_all()
+        zones = zone_repo.find_all()
+        used_vehicle_count = db.fetchval(
+                """
+                SELECT COUNT(DISTINCT vehicle_id)
+                FROM routes
+                WHERE deleted_at IS NULL
+                AND vehicle_id IS NOT NULL
+                """
+        ) or 0
+        
+        # Calculate route stats and track which clusters have routes
+        total_distance = 0
+        total_duration = 0
+        route_count = 0
+        clusters_with_routes = set()
+        
+        for cluster in clusters:
+            route = route_repo.find_by_cluster(cluster.id)
+            if route:
+                total_distance += route.distance_km
+                total_duration += route.duration_min
+                route_count += 1
+                clusters_with_routes.add(cluster.id)
+        
+        excluded = sum(1 for e in employees if e.excluded)
+        # Unassigned = active employees whose cluster doesn't have a route
+        unassigned = sum(1 for e in employees if not e.excluded and (e.cluster_id is None or e.cluster_id not in clusters_with_routes))
+        
+        return jsonify({
+            'total_employees': len(employees),
+            'active_employees': len(employees) - excluded,
+            'excluded_employees': excluded,
+            'unassigned_employees': unassigned,
+            'total_clusters': len(clusters),
+            'total_routes': route_count,
+            'total_vehicles': used_vehicle_count,
+            'total_zones': len(zones),
+            'total_distance_km': round(total_distance, 2),
+            'total_duration_min': round(total_duration, 1)
+        })
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/optimization-mode', methods=['GET'])
+def api_get_optimization_mode():
+    """Get current optimization mode and available presets."""
+    from config import Config
+    return jsonify({
+        'current_mode': getattr(Config, 'OPTIMIZATION_MODE', 'balanced'),
+        'presets': Config.OPTIMIZATION_PRESETS
+    })
+
+
+@app.route('/api/generate-routes', methods=['POST'])
+def api_generate_routes():
+    """Trigger route generation. Accepts optional JSON body: { "mode": "budget"|"balanced"|"employee" }"""
+    try:
+        from config import Config
+        from services import ServicePlanner
+        
+        # Read optimization mode from request
+        mode = None
+        if request.is_json and request.json:
+            mode = request.json.get('mode')
+        
+        # Run route generation with selected mode
+        planner = ServicePlanner(Config)
+        planner.run(optimization_mode=mode)
+        
+        # Return updated stats
+        employees = employee_repo.find_all()
+        clusters = cluster_repo.find_all()
+        used_vehicle_count = db.fetchval(
+                """
+                SELECT COUNT(DISTINCT vehicle_id)
+                FROM routes
+                WHERE deleted_at IS NULL
+                    AND vehicle_id IS NOT NULL
+                """
+        ) or 0
+        
+        total_distance = 0
+        total_duration = 0
+        route_count = 0
+        
+        for cluster in clusters:
+            route = route_repo.find_by_cluster(cluster.id)
+            if route:
+                total_distance += route.distance_km
+                total_duration += route.duration_min
+                route_count += 1
+        
+        excluded = sum(1 for e in employees if e.excluded)
+        
+        return jsonify({
+            'success': True,
+            'message': 'Routes generated successfully',
+            'stats': {
+                'total_employees': len(employees),
+                'active_employees': len(employees) - excluded,
+                'total_routes': route_count,
+                'total_vehicles': used_vehicle_count,
+                'total_distance_km': round(total_distance, 2),
+                'total_duration_min': round(total_duration, 1)
+            }
+        })
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+# =============================================================================
+# REST API - Employees
+# =============================================================================
+
+@app.route('/api/employees')
+def api_employees():
+    """Get all employees."""
+    try:
+        employees = employee_repo.find_all()
+        clusters = cluster_repo.find_all()
+        
+        # Find which clusters have routes
+        clusters_with_routes = set()
+        for cluster in clusters:
+            route = route_repo.find_by_cluster(cluster.id)
+            if route:
+                clusters_with_routes.add(cluster.id)
+        
+        return jsonify([{
+            'id': e.id,
+            'name': e.name or f'Employee {e.id}',
+            'lat': e.lat,
+            'lon': e.lon,
+            'zone_id': e.zone_id,
+            'cluster_id': e.cluster_id,
+            'excluded': e.excluded,
+            'exclusion_reason': e.exclusion_reason,
+            'pickup_point': e.pickup_point,
+            'has_route': e.cluster_id is not None and e.cluster_id in clusters_with_routes
+        } for e in employees])
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/employees/<int:id>')
+def api_employee(id):
+    """Get single employee."""
+    try:
+        e = employee_repo.find_by_id(id)
+        if not e:
+            return jsonify({'error': 'Employee not found'}), 404
+        return jsonify({
+            'id': e.id,
+            'name': e.name or f'Employee {e.id}',
+            'lat': e.lat,
+            'lon': e.lon,
+            'zone_id': e.zone_id,
+            'cluster_id': e.cluster_id,
+            'excluded': e.excluded,
+            'exclusion_reason': e.exclusion_reason,
+            'pickup_point': e.pickup_point
+        })
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/employees/<int:id>', methods=['PUT'])
+def api_update_employee(id):
+    """Update employee."""
+    try:
+        e = employee_repo.find_by_id(id)
+        if not e:
+            return jsonify({'error': 'Employee not found'}), 404
+        
+        data = request.json
+        if 'excluded' in data:
+            e.excluded = data['excluded']
+        if 'exclusion_reason' in data:
+            e.exclusion_reason = data['exclusion_reason']
+        
+        employee_repo.save(e)
+        return jsonify({'success': True})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/employees/<int:id>/pickup-point', methods=['PUT'])
+def api_update_employee_pickup(id):
+    """Update an employee's assigned pickup point (stop)."""
+    try:
+        e = employee_repo.find_by_id(id)
+        if not e:
+            return jsonify({'error': 'Employee not found'}), 404
+
+        data = request.json
+        lat = data.get('lat')
+        lon = data.get('lon')
+        if lat is None or lon is None:
+            return jsonify({'error': 'lat and lon are required'}), 400
+
+        employee_repo.update_pickup_point(id, (float(lat), float(lon)))
+        return jsonify({'success': True, 'pickup_point': [float(lat), float(lon)]})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+# =============================================================================
+# REST API - Walking Route (OSRM)
+# =============================================================================
+
+@app.route('/api/walking-route')
+def api_walking_route():
+    """Get walking route between two points using OSRM."""
+    try:
+        origin_lat = request.args.get('origin_lat', type=float)
+        origin_lon = request.args.get('origin_lon', type=float)
+        dest_lat = request.args.get('dest_lat', type=float)
+        dest_lon = request.args.get('dest_lon', type=float)
+        
+        if None in (origin_lat, origin_lon, dest_lat, dest_lon):
+            return jsonify({'error': 'origin_lat, origin_lon, dest_lat, dest_lon are required'}), 400
+        
+        from routing import OSRMRouter
+        router = OSRMRouter()
+        result = router.get_route(
+            [(origin_lat, origin_lon), (dest_lat, dest_lon)],
+            profile='foot'
+        )
+        # Local OSRM only has driving data, so override duration
+        # with walking speed estimate (~5 km/h = 12 min/km)
+        result['duration_min'] = round(result['distance_km'] * 12, 1)
+        return jsonify(result)
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+# =============================================================================
+# REST API - Clusters & Routes
+# =============================================================================
+
+@app.route('/api/clusters')
+def api_clusters():
+    """Get all clusters."""
+    try:
+        clusters = cluster_repo.find_all(include_employees=True)
+        result = []
+        for c in clusters:
+            route = route_repo.find_by_cluster(c.id)
+            result.append({
+                'id': c.id,
+                'center': c.center,
+                'zone_id': c.zone_id,
+                'employee_count': len(c.employees),
+                'has_route': route is not None,
+                'route_distance': route.distance_km if route else 0,
+                'route_duration': route.duration_min if route else 0,
+                'route_stops': route.stops if route else [],
+                'route_coordinates': route.coordinates if route else []
+            })
+        return jsonify(result)
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/clusters/<int:id>')
+def api_cluster(id):
+    """Get single cluster with employees and route."""
+    try:
+        c = cluster_repo.find_by_id(id, include_employees=True)
+        if not c:
+            return jsonify({'error': 'Cluster not found'}), 404
+        
+        route = route_repo.find_by_cluster(id)
+        
+        # Only compute walking distances when explicitly requested (expensive OSRM call)
+        include_walking = request.args.get('include_walking', 'false').lower() == 'true'
+        walking_distances = {}
+        
+        if include_walking:
+            employees_with_pickup = [e for e in c.employees if e.pickup_point]
+            if employees_with_pickup:
+                try:
+                    from routing import OSRMRouter
+                    router = OSRMRouter()
+                    emp_locs = [(e.lat, e.lon) for e in employees_with_pickup]
+                    pickup_locs = [e.pickup_point for e in employees_with_pickup]
+                    distances = router.get_distance_matrix(emp_locs, pickup_locs, profile='foot')
+                    if distances:
+                        for i, emp in enumerate(employees_with_pickup):
+                            if distances[i] and len(distances[i]) > i:
+                                walking_distances[emp.id] = distances[i][i]
+                except Exception as e:
+                    print(f"Error calculating walking distances: {e}")
+        
+        return jsonify({
+            'id': c.id,
+            'center': c.center,
+            'zone_id': c.zone_id,
+            'employees': [{
+                'id': e.id,
+                'name': e.name or f'Employee {e.id}',
+                'lat': e.lat,
+                'lon': e.lon,
+                'pickup_point': e.pickup_point,
+                'walking_distance': walking_distances.get(e.id)
+            } for e in c.employees],
+            'route': {
+                'distance_km': route.distance_km,
+                'duration_min': route.duration_min,
+                'stops': route.stops,
+                'optimized': route.optimized
+            } if route else None
+        })
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/routes')
+def api_routes():
+    """Get all routes with cluster info."""
+    try:
+        include_bus_stops = request.args.get('include_bus_stops', 'false').lower() == 'true'
+        clusters = cluster_repo.find_all(include_employees=False)
+        all_transit_stops = _get_transit_stops_cached() if include_bus_stops else []
+        
+        routes = []
+        for c in clusters:
+            route = route_repo.find_by_cluster(c.id)
+            if route:
+                vehicle_info = db.fetchone(
+                    """
+                    SELECT r.vehicle_id, v.driver_name, v.plate_number
+                    FROM routes r
+                    LEFT JOIN vehicles v ON v.id = r.vehicle_id AND v.deleted_at IS NULL
+                    WHERE r.cluster_id = %s AND r.deleted_at IS NULL
+                    LIMIT 1
+                    """,
+                    (c.id,)
+                ) or {}
+                bus_stops = []
+                if include_bus_stops:
+                    if c.id in _bus_stops_cache:
+                        bus_stops = _bus_stops_cache[c.id]
+                    else:
+                        from config import Config
+                        discovery_buffer = getattr(Config, 'BUS_STOP_DISCOVERY_BUFFER_METERS', 150)
+                        same_side = getattr(Config, 'FILTER_STOPS_BY_ROUTE_SIDE', True)
+                        bus_stops = route.find_all_stops_along_route(all_transit_stops, buffer_meters=discovery_buffer, same_side_only=same_side)
+                        _bus_stops_cache[c.id] = bus_stops
+                employee_count = employee_repo.count_by_cluster(c.id)
+                
+                routes.append({
+                    'cluster_id': c.id,
+                    'center': c.center,
+                    'distance_km': route.distance_km,
+                    'duration_min': route.duration_min,
+                    'stops': route.stops,
+                    'bus_stops': bus_stops,
+                    'coordinates': route.coordinates,
+                    'stop_count': len(route.stops),
+                    'bus_stop_count': len(bus_stops),
+                    'employee_count': employee_count,
+                    'optimized': route.optimized,
+                    'vehicle_id': vehicle_info.get('vehicle_id'),
+                    'driver_name': vehicle_info.get('driver_name'),
+                    'vehicle_plate': vehicle_info.get('plate_number')
+                })
+        return jsonify(routes)
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/routes/<int:cluster_id>', methods=['GET'])
+def api_get_route(cluster_id):
+    """Get a single route with full details including bus stops."""
+    try:
+        cluster = cluster_repo.find_by_id(cluster_id, include_employees=False)
+        if not cluster:
+            return jsonify({'error': 'Cluster not found'}), 404
+        
+        route = route_repo.find_by_cluster(cluster_id)
+        if not route:
+            return jsonify({'error': 'Route not found'}), 404
+        
+        # Use cached bus stops if available, otherwise compute and cache
+        if cluster_id in _bus_stops_cache:
+            bus_stops = _bus_stops_cache[cluster_id]
+        else:
+            from config import Config
+            all_transit_stops = _get_transit_stops_cached()
+            discovery_buffer = getattr(Config, 'BUS_STOP_DISCOVERY_BUFFER_METERS', 150)
+            same_side = getattr(Config, 'FILTER_STOPS_BY_ROUTE_SIDE', True)
+            bus_stops = route.find_all_stops_along_route(all_transit_stops, buffer_meters=discovery_buffer, same_side_only=same_side)
+            _bus_stops_cache[cluster_id] = bus_stops
+        
+        employee_count = employee_repo.count_by_cluster(cluster_id)
+        vehicle_info = db.fetchone(
+            """
+            SELECT r.vehicle_id, v.driver_name, v.plate_number
+            FROM routes r
+            LEFT JOIN vehicles v ON v.id = r.vehicle_id AND v.deleted_at IS NULL
+            WHERE r.cluster_id = %s AND r.deleted_at IS NULL
+            LIMIT 1
+            """,
+            (cluster_id,)
+        ) or {}
+        
+        return jsonify({
+            'cluster_id': cluster.id,
+            'center': cluster.center,
+            'distance_km': route.distance_km,
+            'duration_min': route.duration_min,
+            'stops': route.stops,
+            'bus_stops': bus_stops,
+            'coordinates': route.coordinates,
+            'stop_count': len(route.stops),
+            'bus_stop_count': len(bus_stops),
+            'employee_count': employee_count,
+            'optimized': route.optimized,
+            'vehicle_id': vehicle_info.get('vehicle_id'),
+            'driver_name': vehicle_info.get('driver_name'),
+            'vehicle_plate': vehicle_info.get('plate_number')
+        })
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/routes/<int:cluster_id>', methods=['PUT'])
+def api_update_route(cluster_id):
+    """Update route stops for a cluster and reassign employee pickup points."""
+    try:
+        # Invalidate bus_stops cache for this route
+        _bus_stops_cache.pop(cluster_id, None)
+        
+        route = route_repo.find_by_cluster(cluster_id)
+        if not route:
+            return jsonify({'error': 'Route not found'}), 404
+        
+        data = request.json
+        if 'stops' in data:
+            route.stops = [tuple(s) for s in data['stops']]
+        
+        if 'coordinates' in data and data['coordinates']:
+            route.coordinates = [list(c) for c in data['coordinates']]
+        
+        if 'distance_km' in data:
+            route.distance_km = data['distance_km']
+        
+        if 'duration_min' in data:
+            route.duration_min = data['duration_min']
+        
+        # Mark as modified (not optimized)
+        route.optimized = False
+            
+        # Get cluster with employees
+        cluster = cluster_repo.find_by_id(cluster_id, include_employees=True)
+        vehicle_id = None
+        
+        # Reassign employees to nearest stops on the modified route
+        matched_count = 0
+        bus_stops = []
+        if cluster and cluster.employees and route.coordinates:
+            # Load transit stops (bus stops) for proper matching
+            from utils import DataGenerator
+            data_gen = DataGenerator()
+            safe_stops = data_gen.get_transit_stops()
+            from config import Config
+            
+            # Find all bus stops along the new route
+            discovery_buffer = getattr(Config, 'BUS_STOP_DISCOVERY_BUFFER_METERS', 150)
+            same_side = getattr(Config, 'FILTER_STOPS_BY_ROUTE_SIDE', True)
+            bus_stops = route.find_all_stops_along_route(safe_stops, buffer_meters=discovery_buffer, same_side_only=same_side)
+            
+            stop_buffer = getattr(Config, 'ROUTE_STOP_BUFFER_METERS', 150)
+            matched_count = route.match_employees_to_route(
+                cluster.employees,
+                safe_stops,
+                buffer_meters=stop_buffer,
+            )
+            
+            # Update employee pickup points in database
+            if matched_count > 0:
+                for emp in cluster.employees:
+                    if emp.pickup_point:
+                        employee_repo.update_pickup_point(emp.id, emp.pickup_point)
+        
+        route_repo.save(route, cluster_id, vehicle_id)
+            
+        return jsonify({
+            'success': True, 
+            'employees_reassigned': matched_count,
+            'bus_stops': bus_stops,
+            'bus_stop_count': len(bus_stops)
+        })
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return jsonify({'error': str(e)}), 500
+
+
+# =============================================================================
+# REST API - Vehicles
+# =============================================================================
+
+@app.route('/api/vehicles')
+def api_vehicles():
+    """Get all vehicles."""
+    try:
+        vehicles = vehicle_repo.find_all()
+        return jsonify([{
+            'id': v.id,
+            'capacity': v.capacity,
+            'vehicle_type': v.vehicle_type,
+            'driver_name': v.driver_name,
+            'plate_number': v.plate_number
+        } for v in vehicles])
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/vehicles/<int:id>')
+def api_get_vehicle(id):
+    """Get a single vehicle by ID."""
+    try:
+        v = vehicle_repo.find_by_id(id)
+        if not v:
+            return jsonify({'error': 'Vehicle not found'}), 404
+        return jsonify({
+            'id': v.id,
+            'capacity': v.capacity,
+            'vehicle_type': v.vehicle_type,
+            'driver_name': v.driver_name,
+            'plate_number': v.plate_number
+        })
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/vehicles/<int:id>', methods=['PUT'])
+def api_update_vehicle(id):
+    """Update vehicle."""
+    try:
+        v = vehicle_repo.find_by_id(id)
+        if not v:
+            return jsonify({'error': 'Vehicle not found'}), 404
+        
+        data = request.json
+        if 'driver_name' in data:
+            v.driver_name = data['driver_name']
+        if 'capacity' in data:
+            v.capacity = data['capacity']
+        
+        vehicle_repo.save(v)
+        return jsonify({'success': True})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+# =============================================================================
+# REST API - Bus Stop Names
+# =============================================================================
+
+# Cache for transit stop names (separate from coordinates cache)
+_transit_stop_names_cache: dict[tuple[float, float], str] | None = None
+
+@app.route('/api/stops/names', methods=['POST'])
+def api_stop_names():
+    """Look up bus stop names by coordinates."""
+    try:
+        names_cache = _get_transit_stop_names_cached()
+        
+        data = request.json
+        coordinates = data.get('coordinates', [])  # List of [lat, lon] pairs
+        
+        # Build a lookup dict rounded to 4 decimal places (~11m precision)
+        # for fast O(1) matching instead of brute-force iteration
+        if not hasattr(api_stop_names, '_grid'):
+            grid: dict[tuple[int, int], tuple[float, str]] = {}
+            for (stop_lat, stop_lon), name in names_cache.items():
+                # Round to 4 decimals (~11m grid cells)
+                key = (round(stop_lat, 4), round(stop_lon, 4))
+                grid[key] = (abs(stop_lat) + abs(stop_lon), name)
+            api_stop_names._grid = grid
+        
+        grid = api_stop_names._grid
+        results = {}
+        for coord in coordinates:
+            lat, lon = coord[0], coord[1]
+            key = f"{lat:.5f},{lon:.5f}"
+            # Check 3x3 neighborhood of grid cells for nearest match
+            best_name = None
+            best_dist = 0.0005  # ~50m threshold
+            rlat, rlon = round(lat, 4), round(lon, 4)
+            for dlat in (-0.0001, 0, 0.0001):
+                for dlon in (-0.0001, 0, 0.0001):
+                    gkey = (round(rlat + dlat, 4), round(rlon + dlon, 4))
+                    if gkey in grid:
+                        slat_slon_sum, name = grid[gkey]
+                        # Approximate distance using the original coords from cache
+                        for (slat, slon), sname in names_cache.items():
+                            if round(slat, 4) == gkey[0] and round(slon, 4) == gkey[1]:
+                                dist = abs(slat - lat) + abs(slon - lon)
+                                if dist < best_dist:
+                                    best_dist = dist
+                                    best_name = sname
+                                break
+            results[key] = best_name or 'Bus Stop'
+        
+        return jsonify(results)
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return jsonify({'error': str(e)}), 500
+
+
+# =============================================================================
+# REST API - Cost Report
+# =============================================================================
+
+@app.route('/api/cost-report')
+def api_cost_report():
+    """Calculate comprehensive cost report including Turkish taxes."""
+    try:
+        from config import Config
+        
+        # Fetch real data from database
+        employees = employee_repo.find_all()
+        clusters = cluster_repo.find_all()
+        
+        total_distance = 0.0
+        total_duration = 0.0
+        route_count = 0
+        for cluster in clusters:
+            route = route_repo.find_by_cluster(cluster.id)
+            if route:
+                total_distance += float(route.distance_km)
+                total_duration += float(route.duration_min)
+                route_count += 1
+
+        active_employees = sum(1 for e in employees if not e.excluded)
+        # Cost report should use actively assigned vehicles, not total fleet inventory.
+        used_vehicle_count = db.fetchval(
+            """
+            SELECT COUNT(DISTINCT vehicle_id)
+            FROM routes
+            WHERE deleted_at IS NULL
+              AND vehicle_id IS NOT NULL
+            """
+        ) or 0
+        vehicle_count = int(used_vehicle_count) if used_vehicle_count else route_count
+        
+        # Override defaults with query parameters
+        def qp(name, default):
+            val = request.args.get(name)
+            return float(val) if val is not None else default
+        
+        # === Cost Parameters (overridable) ===
+        driver_gross_salary   = qp('driver_salary', 35000)       # ₺/month
+        sgk_employer_rate     = qp('sgk_rate', 22.5) / 100       # 22.5%
+        unemployment_rate     = qp('unemployment_rate', 2) / 100  # 2%
+        reserve_driver_ratio  = qp('reserve_driver_ratio', 10) / 100  # 10%
+        drivers_per_vehicle   = qp('drivers_per_vehicle', 1)      # ratio
+        vehicle_rent          = qp('vehicle_rent', 25000)         # ₺/month per vehicle
+        fuel_price_per_liter  = qp('fuel_price', 43.5)            # ₺/liter
+        fuel_consumption      = qp('fuel_consumption', 15)        # liters/100km
+        toll_daily_total      = qp('toll_daily', 450)             # ₺/day all fleet
+        misc_variable_per_km  = qp('misc_variable_per_km', 0.75)  # ₺/km
+        maintenance_monthly   = qp('maintenance', 8000)           # ₺/month per vehicle
+        mtv_monthly           = qp('mtv', 1500)                   # ₺/month per vehicle
+        insurance_monthly     = qp('insurance', 2500)             # ₺/month per vehicle
+        tyre_monthly          = qp('tyre', 2000)                  # ₺/month per vehicle
+        working_days          = qp('working_days', 22)            # days/month
+        trips_per_day         = qp('trips_per_day', 2)            # round-trip (morning+evening)
+        overhead_rate         = qp('overhead_rate', 5) / 100      # 5%
+        profit_rate           = qp('profit_rate', 10) / 100       # 10%
+        kdv_rate              = qp('kdv_rate', 20) / 100          # 20%
+        stamp_tax_rate        = qp('stamp_tax_rate', 0.948) / 100 # 0.948%
+        contract_months       = qp('contract_months', 12)         # months
+        
+        # === Calculations ===
+        
+        # 1. Driver costs (monthly)
+        effective_driver_count = math.ceil(vehicle_count * drivers_per_vehicle * (1 + reserve_driver_ratio)) if vehicle_count else 0
+        sgk_cost = driver_gross_salary * sgk_employer_rate
+        unemployment_cost = driver_gross_salary * unemployment_rate
+        driver_total_per_driver = driver_gross_salary + sgk_cost + unemployment_cost
+        driver_total = driver_total_per_driver * effective_driver_count
+        
+        # 2. Vehicle costs (monthly, all vehicles)
+        vehicle_rent_total = vehicle_rent * vehicle_count
+        maintenance_total = maintenance_monthly * vehicle_count
+        mtv_total = mtv_monthly * vehicle_count
+        insurance_total = insurance_monthly * vehicle_count
+        tyre_total = tyre_monthly * vehicle_count
+        vehicle_total = vehicle_rent_total + maintenance_total + mtv_total + insurance_total + tyre_total
+        
+        # 3. Fuel costs (monthly, all routes)
+        daily_km = total_distance * trips_per_day
+        monthly_km = daily_km * working_days
+        fuel_liters_monthly = monthly_km * fuel_consumption / 100
+        fuel_total = fuel_liters_monthly * fuel_price_per_liter
+        toll_total = toll_daily_total * working_days
+        misc_variable_total = monthly_km * misc_variable_per_km
+        variable_total = fuel_total + toll_total + misc_variable_total
+        
+        # 4. Subtotal (before overhead/profit/taxes)
+        subtotal = driver_total + vehicle_total + variable_total
+
+        # Fixed vs variable split for managerial reporting
+        fixed_total = driver_total + vehicle_total
+        fixed_share_pct = (fixed_total / subtotal * 100) if subtotal else 0
+        variable_share_pct = (variable_total / subtotal * 100) if subtotal else 0
+        
+        # 5. Overhead
+        overhead_total = subtotal * overhead_rate
+        
+        # 6. Net operational cost
+        net_cost = subtotal + overhead_total
+        
+        # 7. Profit margin
+        profit_total = net_cost * profit_rate
+        
+        # 8. Pre-tax total
+        pre_tax_total = net_cost + profit_total
+        
+        # 9. KDV
+        kdv_total = pre_tax_total * kdv_rate
+        
+        # 10. Grand total (monthly tender price)
+        grand_total_monthly = pre_tax_total + kdv_total
+        
+        # 11. Stamp tax (on contract value)
+        contract_value = grand_total_monthly * contract_months
+        stamp_tax = contract_value * stamp_tax_rate
+        
+        # 12. Final contract value
+        final_contract = contract_value + stamp_tax
+
+        def compute_grand_total_monthly(driver_c, vehicle_c, variable_c):
+            st = driver_c + vehicle_c + variable_c
+            ov = st * overhead_rate
+            net = st + ov
+            pf = net * profit_rate
+            pre = net + pf
+            kd = pre * kdv_rate
+            return pre + kd
+
+        base_monthly = grand_total_monthly
+        scenario_fuel_10_var = (fuel_total * 1.10) + toll_total + misc_variable_total
+        scenario_salary_10_driver = driver_total * 1.10
+        scenario_km_10_var = (fuel_total * 1.10) + toll_total + (misc_variable_total * 1.10)
+
+        scenario_fuel_plus_10 = compute_grand_total_monthly(driver_total, vehicle_total, scenario_fuel_10_var)
+        scenario_salary_plus_10 = compute_grand_total_monthly(scenario_salary_10_driver, vehicle_total, variable_total)
+        scenario_km_plus_10 = compute_grand_total_monthly(driver_total, vehicle_total, scenario_km_10_var)
+
+        monthly_trip_count = route_count * trips_per_day * working_days
+        
+        return jsonify({
+            # System data
+            'system': {
+                'total_employees': len(employees),
+                'active_employees': active_employees,
+                'vehicle_count': vehicle_count,
+                'route_count': route_count,
+                'total_distance_km': round(total_distance, 2),
+                'total_duration_min': round(total_duration, 1),
+                'daily_km': round(daily_km, 2),
+                'monthly_km': round(monthly_km, 2),
+                'monthly_trip_count': int(monthly_trip_count),
+            },
+            # Parameters used
+            'params': {
+                'driver_salary': driver_gross_salary,
+                'sgk_rate': round(sgk_employer_rate * 100, 2),
+                'unemployment_rate': round(unemployment_rate * 100, 2),
+                'reserve_driver_ratio': round(reserve_driver_ratio * 100, 2),
+                'drivers_per_vehicle': drivers_per_vehicle,
+                'vehicle_rent': vehicle_rent,
+                'fuel_price': fuel_price_per_liter,
+                'fuel_consumption': fuel_consumption,
+                'toll_daily': toll_daily_total,
+                'misc_variable_per_km': misc_variable_per_km,
+                'maintenance': maintenance_monthly,
+                'mtv': mtv_monthly,
+                'insurance': insurance_monthly,
+                'tyre': tyre_monthly,
+                'working_days': working_days,
+                'trips_per_day': trips_per_day,
+                'overhead_rate': round(overhead_rate * 100, 2),
+                'profit_rate': round(profit_rate * 100, 2),
+                'kdv_rate': round(kdv_rate * 100, 2),
+                'stamp_tax_rate': round(stamp_tax_rate * 100, 3),
+                'contract_months': contract_months,
+            },
+            # Cost breakdown (monthly)
+            'breakdown': {
+                'driver': {
+                    'gross_salary': round(driver_gross_salary, 2),
+                    'sgk_per_driver': round(sgk_cost, 2),
+                    'unemployment_per_driver': round(unemployment_cost, 2),
+                    'effective_driver_count': int(effective_driver_count),
+                    'total_per_driver': round(driver_total_per_driver, 2),
+                    'total': round(driver_total, 2),
+                },
+                'vehicle': {
+                    'rent_per_vehicle': round(vehicle_rent, 2),
+                    'rent_total': round(vehicle_rent_total, 2),
+                    'maintenance_per_vehicle': round(maintenance_monthly, 2),
+                    'maintenance_total': round(maintenance_total, 2),
+                    'mtv_per_vehicle': round(mtv_monthly, 2),
+                    'mtv_total': round(mtv_total, 2),
+                    'insurance_per_vehicle': round(insurance_monthly, 2),
+                    'insurance_total': round(insurance_total, 2),
+                    'tyre_per_vehicle': round(tyre_monthly, 2),
+                    'tyre_total': round(tyre_total, 2),
+                    'total': round(vehicle_total, 2),
+                },
+                'fuel': {
+                    'liters_monthly': round(fuel_liters_monthly, 2),
+                    'total': round(fuel_total, 2),
+                },
+                'toll': {
+                    'daily_total': round(toll_daily_total, 2),
+                    'total': round(toll_total, 2),
+                },
+                'misc_variable': {
+                    'per_km': round(misc_variable_per_km, 2),
+                    'total': round(misc_variable_total, 2),
+                },
+                'variable_total': round(variable_total, 2),
+                'fixed_total': round(fixed_total, 2),
+                'fixed_share_pct': round(fixed_share_pct, 2),
+                'variable_share_pct': round(variable_share_pct, 2),
+                'subtotal': round(subtotal, 2),
+                'overhead': round(overhead_total, 2),
+                'net_cost': round(net_cost, 2),
+                'profit': round(profit_total, 2),
+                'pre_tax_total': round(pre_tax_total, 2),
+                'kdv': round(kdv_total, 2),
+                'grand_total_monthly': round(grand_total_monthly, 2),
+            },
+            # Contract summary
+            'contract': {
+                'months': int(contract_months),
+                'monthly_total': round(grand_total_monthly, 2),
+                'contract_value': round(contract_value, 2),
+                'stamp_tax': round(stamp_tax, 2),
+                'final_total': round(final_contract, 2),
+                'per_employee_monthly': round(grand_total_monthly / active_employees, 2) if active_employees else 0,
+                'per_vehicle_monthly': round(grand_total_monthly / vehicle_count, 2) if vehicle_count else 0,
+                'per_km': round(grand_total_monthly / monthly_km, 2) if monthly_km else 0,
+                'per_trip': round(grand_total_monthly / monthly_trip_count, 2) if monthly_trip_count else 0,
+            },
+            'sensitivity': {
+                'base_monthly': round(base_monthly, 2),
+                'fuel_plus_10': round(scenario_fuel_plus_10, 2),
+                'salary_plus_10': round(scenario_salary_plus_10, 2),
+                'km_plus_10': round(scenario_km_plus_10, 2),
+                'fuel_delta': round(scenario_fuel_plus_10 - base_monthly, 2),
+                'salary_delta': round(scenario_salary_plus_10 - base_monthly, 2),
+                'km_delta': round(scenario_km_plus_10 - base_monthly, 2),
+            }
+        })
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return jsonify({'error': str(e)}), 500
+
+
+# =============================================================================
+# Trip History API
+# =============================================================================
+
+@app.route('/api/trips', methods=['POST'])
+def save_trip():
+    """Save a completed trip to the database."""
+    try:
+        data = request.get_json()
+        if not data:
+            return jsonify({'error': 'No data provided'}), 400
+
+        trip_id = trip_history_repo.save_trip(
+            route_id=data.get('routeId', 0),
+            driver_id=data.get('driverId'),
+            driver_name=data.get('driverName'),
+            vehicle_id=data.get('vehicleId'),
+            vehicle_plate=data.get('vehiclePlate'),
+            distance_km=data.get('distanceKm', 0),
+            duration_min=data.get('durationMin', 0),
+            total_stops=data.get('totalStops', 0),
+            total_passengers=data.get('totalPassengers', 0),
+            boarded_count=data.get('boardedCount', 0),
+            absent_count=data.get('absentCount', 0),
+            started_at=data.get('startedAt'),
+            ended_at=data.get('endedAt'),
+            status=data.get('status', 'completed'),
+            passengers=data.get('passengers'),
+        )
+        return jsonify({'id': trip_id}), 201
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/trips/driver/<int:driver_id>')
+def get_driver_trips(driver_id: int):
+    """Get trip history for a driver."""
+    try:
+        limit = request.args.get('limit', 50, type=int)
+        trips = trip_history_repo.find_by_driver(driver_id, limit=limit)
+        # Convert datetime objects to ISO strings for JSON serialization
+        for t in trips:
+            for key in ('started_at', 'ended_at', 'created_at'):
+                if key in t and t[key] is not None:
+                    t[key] = t[key].isoformat() if hasattr(t[key], 'isoformat') else str(t[key])
+        return jsonify(trips)
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/trips/employee/<int:employee_id>')
+def get_employee_trips(employee_id: int):
+    """Get trip history for an employee."""
+    try:
+        limit = request.args.get('limit', 50, type=int)
+        trips = trip_history_repo.find_by_employee(employee_id, limit=limit)
+        for t in trips:
+            for key in ('started_at', 'ended_at', 'created_at'):
+                if key in t and t[key] is not None:
+                    t[key] = t[key].isoformat() if hasattr(t[key], 'isoformat') else str(t[key])
+        return jsonify(trips)
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/trips/<int:trip_id>')
+def get_trip_detail(trip_id: int):
+    """Get detailed trip info including passengers."""
+    try:
+        trip = trip_history_repo.find_by_id(trip_id)
+        if not trip:
+            return jsonify({'error': 'Trip not found'}), 404
+        for key in ('started_at', 'ended_at', 'created_at'):
+            if key in trip and trip[key] is not None:
+                trip[key] = trip[key].isoformat() if hasattr(trip[key], 'isoformat') else str(trip[key])
+        return jsonify(trip)
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+# =============================================================================
+# Real-Time Tracking (Socket.IO)
+# =============================================================================
+
+# In-memory store of active trips: { route_id: { driver_location, trip_active, ... } }
+_active_trips: dict[int, dict] = {}
+
+
+@socketio.on('connect')
+def handle_connect():
+    print(f'[Socket.IO] Client connected: {request.sid}')
+
+
+@socketio.on('disconnect')
+def handle_disconnect():
+    print(f'[Socket.IO] Client disconnected: {request.sid}')
+
+
+@socketio.on('join_route')
+def handle_join_route(data):
+    """Both drivers and passengers join a route room to receive updates."""
+    route_id = data.get('routeId')
+    role = data.get('role', 'employee')
+    if route_id is not None:
+        room = f'route_{route_id}'
+        join_room(room)
+        print(f'[Socket.IO] {role} {request.sid} joined room {room}')
+        # If there's an active trip for this route, send current state immediately
+        if route_id in _active_trips:
+            emit('trip_update', _active_trips[route_id])
+
+
+@socketio.on('leave_route')
+def handle_leave_route(data):
+    route_id = data.get('routeId')
+    if route_id is not None:
+        room = f'route_{route_id}'
+        leave_room(room)
+        print(f'[Socket.IO] {request.sid} left room {room}')
+
+
+@socketio.on('trip_start')
+def handle_trip_start(data):
+    """Driver starts a trip — broadcast to all passengers on this route."""
+    route_id = data.get('routeId')
+    if route_id is None:
+        return
+    trip_data = {
+        'routeId': route_id,
+        'tripActive': True,
+        'latitude': data.get('latitude', 0),
+        'longitude': data.get('longitude', 0),
+        'currentStopIndex': 0,
+        'totalStops': data.get('totalStops', 0),
+        'driverName': data.get('driverName', 'Driver'),
+        'vehiclePlate': data.get('vehiclePlate', ''),
+        'boardingStatuses': {},
+    }
+    _active_trips[route_id] = trip_data
+    room = f'route_{route_id}'
+    emit('trip_started', trip_data, to=room)
+    print(f'[Socket.IO] Trip started on route {route_id}')
+
+
+@socketio.on('location_update')
+def handle_location_update(data):
+    """Driver sends location updates — broadcast to all passengers."""
+    route_id = data.get('routeId')
+    if route_id is None or route_id not in _active_trips:
+        return
+    _active_trips[route_id].update({
+        'latitude': data.get('latitude', 0),
+        'longitude': data.get('longitude', 0),
+        'currentStopIndex': data.get('currentStopIndex', 0),
+    })
+    room = f'route_{route_id}'
+    emit('trip_update', _active_trips[route_id], to=room)
+
+
+@socketio.on('trip_end')
+def handle_trip_end(data):
+    """Driver ends the trip."""
+    route_id = data.get('routeId')
+    if route_id is None:
+        return
+    if route_id in _active_trips:
+        _active_trips[route_id]['tripActive'] = False
+    room = f'route_{route_id}'
+    emit('trip_ended', {'routeId': route_id}, to=room)
+    # Clean up after a short delay to let clients receive the event
+    _active_trips.pop(route_id, None)
+    print(f'[Socket.IO] Trip ended on route {route_id}')
+
+
+@socketio.on('boarding_check')
+def handle_boarding_check(data):
+    """Driver arrived at a stop — notify passengers to confirm boarding."""
+    route_id = data.get('routeId')
+    stop_index = data.get('stopIndex', 0)
+    stop_name = data.get('stopName', 'your stop')
+    if route_id is None:
+        return
+    room = f'route_{route_id}'
+    emit('boarding_check_started', {
+        'routeId': route_id,
+        'stopIndex': stop_index,
+        'stopName': stop_name,
+    }, to=room)
+    print(f'[Socket.IO] Boarding check at stop {stop_index} ("{stop_name}") on route {route_id}')
+
+
+@socketio.on('boarding_update')
+def handle_boarding_update(data):
+    """Passenger confirms/declines boarding — broadcast to driver and other passengers."""
+    route_id = data.get('routeId')
+    employee_id = data.get('employeeId')
+    status = data.get('status')  # 'confirmed' or 'declined'
+    if route_id is None or employee_id is None or status is None:
+        return
+    # Store in active trip data
+    if route_id in _active_trips:
+        _active_trips[route_id].setdefault('boardingStatuses', {})
+        _active_trips[route_id]['boardingStatuses'][str(employee_id)] = status
+    room = f'route_{route_id}'
+    emit('boarding_changed', {
+        'routeId': route_id,
+        'employeeId': employee_id,
+        'status': status,
+    }, to=room)
+    print(f'[Socket.IO] Boarding {status} for employee {employee_id} on route {route_id}')
+
+
+# =============================================================================
+# Run Server
+# =============================================================================
+
+if __name__ == '__main__':
+    print("\n" + "="*50)
+    print("  Routing Engine Management Dashboard")
+    print("  (with real-time Socket.IO tracking)")
+    print("="*50)
+    print("  Open: http://localhost:5050")
+    print("="*50 + "\n")
+    socketio.run(app, debug=True, host='0.0.0.0', port=5050)
