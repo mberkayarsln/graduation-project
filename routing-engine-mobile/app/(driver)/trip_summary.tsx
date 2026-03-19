@@ -11,7 +11,7 @@ export default function TripSummary() {
     const router = useRouter();
     const [saving, setSaving] = useState(true);
     const [saveError, setSaveError] = useState(false);
-    const savedRef = useRef(false);
+    const lastSavedTripKeyRef = useRef<string | null>(null);
 
     const params = useLocalSearchParams<{
         boarded: string;
@@ -37,13 +37,24 @@ export default function TripSummary() {
     const distanceKm = parseFloat(params.distanceKm || '0');
     const durationMin = parseInt(params.durationMin || '0');
     const routeId = params.routeId || '?';
+    const passengersJson = typeof params.passengersJson === 'string' ? params.passengersJson : '';
+    const tripKey = [
+        params.routeId || '0',
+        params.startedAt || '',
+        params.status || 'completed',
+        params.driverId || '0',
+    ].join('|');
 
     const boardingRate = totalPassengers > 0 ? Math.round((boarded / totalPassengers) * 100) : 0;
 
-    // Persist trip to backend on mount
+    // Persist trip to backend once per unique completed trip payload.
     useEffect(() => {
-        if (savedRef.current) return;
-        savedRef.current = true;
+        if (!params.routeId) return;
+        if (lastSavedTripKeyRef.current === tripKey) return;
+
+        lastSavedTripKeyRef.current = tripKey;
+        setSaving(true);
+        setSaveError(false);
 
         const payload: SaveTripPayload = {
             routeId: parseInt(params.routeId || '0'),
@@ -60,7 +71,7 @@ export default function TripSummary() {
             startedAt: params.startedAt || new Date().toISOString(),
             endedAt: new Date().toISOString(),
             status: (params.status as 'completed' | 'terminated') || 'completed',
-            passengers: params.passengersJson ? JSON.parse(params.passengersJson) : [],
+            passengers: passengersJson ? JSON.parse(passengersJson) : [],
         };
 
         api.saveTrip(payload)
@@ -70,7 +81,23 @@ export default function TripSummary() {
                 setSaveError(true);
                 setSaving(false);
             });
-    }, []);
+    }, [
+        tripKey,
+        params.routeId,
+        params.driverId,
+        params.driverName,
+        params.vehicleId,
+        params.vehiclePlate,
+        params.startedAt,
+        params.status,
+        passengersJson,
+        distanceKm,
+        durationMin,
+        totalStops,
+        totalPassengers,
+        boarded,
+        absentCount,
+    ]);
 
     const stats = [
         { icon: 'people', label: 'Passengers Boarded', value: `${boarded} / ${totalPassengers}`, color: Colors.primary },

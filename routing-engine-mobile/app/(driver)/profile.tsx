@@ -1,7 +1,8 @@
 import React, { useState, useEffect } from 'react';
-import { View, Text, SafeAreaView, Image, ActivityIndicator } from 'react-native';
+import { View, Text, SafeAreaView, ActivityIndicator } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { Colors } from '@/constants/colors';
+import MockProfileAvatar from '@/components/MockProfileAvatar';
 import { api } from '@/services/api';
 import { AuthStore } from '@/services/AuthStore';
 import { Vehicle } from '@/services/types';
@@ -41,14 +42,10 @@ export default function DriverProfile() {
     return (
         <SafeAreaView style={{ flex: 1, backgroundColor: Colors.background }}>
             <View style={{ flex: 1, alignItems: 'center', paddingTop: 40, paddingHorizontal: 20 }}>
-                <Image
-                    source={{ uri: `https://i.pravatar.cc/100?u=driver-${vehicle?.id || 0}` }}
+                <MockProfileAvatar
+                    size={80}
                     style={{
-                        width: 80,
-                        height: 80,
-                        borderRadius: 40,
                         marginBottom: 16,
-                        backgroundColor: Colors.borderLight,
                     }}
                 />
                 <Text style={{ fontSize: 22, fontWeight: '700', color: Colors.text }}>

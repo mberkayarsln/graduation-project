@@ -1,21 +1,21 @@
 import React from 'react';
-import { View, Text, Image, TouchableOpacity } from 'react-native';
+import { View, Text, TouchableOpacity } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { Colors } from '@/constants/colors';
+import MockProfileAvatar from '@/components/MockProfileAvatar';
 
 export type PassengerStatus = 'Waiting' | 'Boarded' | 'Absent';
 
 type PassengerCardProps = {
     name: string;
     status: PassengerStatus;
-    avatar: string;
     stopName?: string;
     /** Whether the status was set by the employee (self-check-in) vs driver */
     selfConfirmed?: boolean;
     onPress?: () => void;
 };
 
-export default function PassengerCard({ name, status, avatar, stopName, selfConfirmed, onPress }: PassengerCardProps) {
+export default function PassengerCard({ name, status, stopName, selfConfirmed, onPress }: PassengerCardProps) {
     const isBoarded = status === 'Boarded';
     const isAbsent = status === 'Absent';
 
@@ -37,14 +37,10 @@ export default function PassengerCard({ name, status, avatar, stopName, selfConf
                 opacity: isAbsent ? 0.6 : 1,
             }}
         >
-            <Image
-                source={{ uri: avatar }}
+            <MockProfileAvatar
+                size={48}
                 style={{
-                    width: 48,
-                    height: 48,
-                    borderRadius: 24,
                     marginRight: 12,
-                    backgroundColor: Colors.borderLight,
                     opacity: isAbsent ? 0.5 : 1,
                 }}
             />

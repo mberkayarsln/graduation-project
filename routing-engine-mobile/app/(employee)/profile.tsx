@@ -1,7 +1,8 @@
 import React from 'react';
-import { View, Text, SafeAreaView, Image } from 'react-native';
+import { View, Text, SafeAreaView } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { Colors } from '@/constants/colors';
+import MockProfileAvatar from '@/components/MockProfileAvatar';
 import { AuthStore } from '@/services/AuthStore';
 
 export default function EmployeeProfile() {
@@ -15,14 +16,10 @@ export default function EmployeeProfile() {
     return (
         <SafeAreaView style={{ flex: 1, backgroundColor: Colors.background }}>
             <View style={{ flex: 1, alignItems: 'center', paddingTop: 40, paddingHorizontal: 20 }}>
-                <Image
-                    source={{ uri: `https://i.pravatar.cc/100?u=emp-${empId ?? 0}` }}
+                <MockProfileAvatar
+                    size={80}
                     style={{
-                        width: 80,
-                        height: 80,
-                        borderRadius: 40,
                         marginBottom: 16,
-                        backgroundColor: Colors.borderLight,
                     }}
                 />
                 <Text style={{ fontSize: 22, fontWeight: '700', color: Colors.text }}>

@@ -1,7 +1,8 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { View, Text, TouchableOpacity, Animated, Dimensions, Image, Platform } from 'react-native';
+import { View, Text, TouchableOpacity, Animated, Dimensions, Platform } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { Colors } from '@/constants/colors';
+import MockProfileAvatar from '@/components/MockProfileAvatar';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 const MENU_WIDTH = SCREEN_WIDTH * 0.68;
@@ -90,14 +91,10 @@ export default function SideMenu({ visible, onClose, items, userName, userEmail 
             }}>
                 {/* User Header */}
                 <View style={{ paddingHorizontal: 24, paddingBottom: 24, borderBottomWidth: 1, borderBottomColor: Colors.borderLight }}>
-                    <Image
-                        source={{ uri: 'https://i.pravatar.cc/100?img=5' }}
+                    <MockProfileAvatar
+                        size={56}
                         style={{
-                            width: 56,
-                            height: 56,
-                            borderRadius: 28,
                             marginBottom: 12,
-                            backgroundColor: Colors.borderLight,
                         }}
                     />
                     <Text style={{ fontSize: 18, fontWeight: '700', color: Colors.text }}>

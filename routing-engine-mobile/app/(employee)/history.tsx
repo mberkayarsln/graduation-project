@@ -1,11 +1,18 @@
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useEffect } from 'react';
 import { View, Text, SafeAreaView, FlatList, ActivityIndicator, RefreshControl, Alert } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { useFocusEffect } from '@react-navigation/native';
+import { useFocusEffect } from 'expo-router';
 import { Colors } from '@/constants/colors';
 import { AuthStore } from '@/services/AuthStore';
 import { api } from '@/services/api';
 import { TripHistory } from '@/services/types';
+
+function normalizeBoardingStatus(status?: string): 'confirmed' | 'declined' | 'waiting' {
+    const normalized = String(status || '').trim().toLowerCase();
+    if (normalized === 'confirmed' || normalized === 'boarded') return 'confirmed';
+    if (normalized === 'declined' || normalized === 'absent') return 'declined';
+    return 'waiting';
+}
 
 function formatDate(iso: string): string {
     const d = new Date(iso);
@@ -42,9 +49,10 @@ function getBoardingIcon(status?: string): string {
 }
 
 function RideCard({ trip }: { trip: TripHistory }) {
-    const color = getBoardingColor(trip.boarding_status);
-    const label = getBoardingLabel(trip.boarding_status);
-    const icon = getBoardingIcon(trip.boarding_status);
+    const boardingStatus = normalizeBoardingStatus(trip.boarding_status);
+    const color = getBoardingColor(boardingStatus);
+    const label = getBoardingLabel(boardingStatus);
+    const icon = getBoardingIcon(boardingStatus);
 
     return (
         <View
@@ -158,10 +166,14 @@ export default function EmployeeHistory() {
         if (isRefresh) setRefreshing(true); else setLoading(true);
         try {
             const auth = AuthStore.get();
-            if (auth) {
-                const data = await api.getEmployeeTrips(auth.id);
-                setTrips(data);
+            const employeeId = auth?.role === 'employee' ? auth.id : null;
+            if (employeeId == null) {
+                setTrips([]);
+                return;
             }
+
+            const data = await api.getEmployeeTrips(employeeId);
+            setTrips(Array.isArray(data) ? data : []);
         } catch (err) {
             console.error('Failed to load employee trips:', err);
             Alert.alert('Connection Error', 'Could not load ride history. Please check your connection and try again.');
@@ -170,6 +182,10 @@ export default function EmployeeHistory() {
             setRefreshing(false);
         }
     }, []);
+
+    useEffect(() => {
+        loadTrips();
+    }, [loadTrips]);
 
     useFocusEffect(
         useCallback(() => {

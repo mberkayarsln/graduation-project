@@ -10,6 +10,7 @@ import { api } from '@/services/api';
 import { AuthStore } from '@/services/AuthStore';
 import { LocationStore } from '@/services/LocationStore';
 import { NotificationService } from '@/services/NotificationService';
+import { SocketService } from '@/services/SocketService';
 import { Route, Vehicle, StopNamesMap } from '@/services/types';
 
 const { height: SCREEN_HEIGHT } = Dimensions.get('window');
@@ -84,7 +85,11 @@ export default function EmployeeHome() {
     }
 
     function refreshRouteActivity() {
-        setRouteActive(LocationStore.isActive());
+        const authUser = AuthStore.get();
+        const myClusterId = authUser?.role === 'employee' ? authUser.clusterId ?? null : null;
+        const driverLocation = LocationStore.get();
+        const isMyRouteActive = !!driverLocation?.tripActive && (myClusterId == null || driverLocation.routeId === myClusterId);
+        setRouteActive(isMyRouteActive);
     }
 
     useEffect(() => {
@@ -94,6 +99,34 @@ export default function EmployeeHome() {
         loadData();
 
         return () => clearInterval(interval);
+    }, []);
+
+    useEffect(() => {
+        const authUser = AuthStore.get();
+        if (!authUser || authUser.role !== 'employee' || authUser.clusterId == null) return;
+
+        const myClusterId = authUser.clusterId;
+
+        const unsubTripStarted = SocketService.onTripStarted((data) => {
+            if (data.routeId !== myClusterId) return;
+            setRouteActive(true);
+        });
+
+        const unsubTripUpdate = SocketService.onTripUpdate((data) => {
+            if (data.routeId !== myClusterId) return;
+            setRouteActive(!!data.tripActive);
+        });
+
+        const unsubTripEnded = SocketService.onTripEnded((data) => {
+            if (data.routeId !== myClusterId) return;
+            setRouteActive(false);
+        });
+
+        return () => {
+            unsubTripStarted();
+            unsubTripUpdate();
+            unsubTripEnded();
+        };
     }, []);
 
     async function loadData() {

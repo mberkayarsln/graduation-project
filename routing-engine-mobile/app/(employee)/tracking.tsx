@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { View, Text, SafeAreaView, Dimensions, Image, TouchableOpacity, ActivityIndicator, Animated, PanResponder, ScrollView, RefreshControl, Alert, Vibration } from 'react-native';
+import { View, Text, SafeAreaView, Dimensions, TouchableOpacity, ActivityIndicator, Animated, PanResponder, ScrollView, RefreshControl, Alert, Vibration } from 'react-native';
 import MapView, { Marker, Polyline } from 'react-native-maps';
 import { Ionicons } from '@expo/vector-icons';
 import { Colors } from '@/constants/colors';
@@ -10,6 +10,7 @@ import { BoardingStore, BoardingStatus } from '@/services/BoardingStore';
 import { SocketService, BoardingCheckPayload } from '@/services/SocketService';
 import { NotificationService } from '@/services/NotificationService';
 import { Route, Vehicle, StopNamesMap } from '@/services/types';
+import MockProfileAvatar from '@/components/MockProfileAvatar';
 
 const { height: SCREEN_HEIGHT } = Dimensions.get('window');
 const SHEET_MAX_HEIGHT = SCREEN_HEIGHT * 0.55;
@@ -620,29 +621,8 @@ export default function EmployeeLiveTracking() {
                                 Waiting for Driver
                             </Text>
                             <Text style={{ fontSize: 14, color: Colors.textSecondary, marginTop: 6, textAlign: 'center', lineHeight: 20 }}>
-                                  Your driver hasn&apos;t started the trip yet.{'\n'}You&apos;ll see real-time tracking once the trip begins.
+                                  Your driver hasn&apos;t started the trip yet.
                             </Text>
-                            <View style={{
-                                flexDirection: 'row',
-                                alignItems: 'center',
-                                marginTop: 16,
-                                backgroundColor: socketConnected ? '#F0FDF4' : '#FEF2F2',
-                                paddingHorizontal: 12,
-                                paddingVertical: 8,
-                                borderRadius: 8,
-                                gap: 6,
-                            }}>
-                                <View style={{
-                                    width: 8, height: 8, borderRadius: 4,
-                                    backgroundColor: socketConnected ? '#22C55E' : '#EF4444',
-                                }} />
-                                <Text style={{
-                                    fontSize: 13, fontWeight: '600',
-                                    color: socketConnected ? '#16A34A' : '#DC2626',
-                                }}>
-                                    {socketConnected ? 'Connected — waiting for trip to start' : 'Connecting to server...'}
-                                </Text>
-                            </View>
                         </View>
                     ) : arrived ? (
                         <View style={{ alignItems: 'center', paddingVertical: 16, marginBottom: 12 }}>
@@ -819,14 +799,10 @@ export default function EmployeeLiveTracking() {
                             borderTopColor: Colors.borderLight,
                         }}
                     >
-                        <Image
-                            source={{ uri: 'https://i.pravatar.cc/100?u=driver-' + (vehicle?.id || 0) }}
+                        <MockProfileAvatar
+                            size={56}
                             style={{
-                                width: 56,
-                                height: 56,
-                                borderRadius: 28,
                                 marginRight: 14,
-                                backgroundColor: Colors.borderLight,
                             }}
                         />
                         <View style={{ flex: 1 }}>

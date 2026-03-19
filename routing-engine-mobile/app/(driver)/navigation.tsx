@@ -206,7 +206,7 @@ export default function DriverActiveNavigation() {
                 if (prev >= routeCoordinates.length - 1) return prev;
                 return prev + 1;
             });
-        }, 100);
+        }, 25);
         return () => clearInterval(interval);
     }, [tripStarted, routeCoordinates.length]);
 
@@ -387,8 +387,27 @@ export default function DriverActiveNavigation() {
         }
 
         if (isLastStop) {
-            const boarded = Object.values(BoardingStore.getAll()).filter(s => s === 'confirmed').length;
-            const absentCount = Object.values(BoardingStore.getAll()).filter(s => s === 'declined').length;
+            const boardingMap = BoardingStore.getAll();
+            const passengersData = passengers.map(p => {
+                const storeStatus = boardingMap[p.id];
+                if (storeStatus === 'confirmed' || storeStatus === 'declined') {
+                    return {
+                        employee_id: p.id,
+                        employee_name: p.name,
+                        boarding_status: storeStatus,
+                    };
+                }
+
+                const uiStatus = passengerStatuses[p.id];
+                return {
+                    employee_id: p.id,
+                    employee_name: p.name,
+                    boarding_status: uiStatus === 'Boarded' ? 'confirmed' : uiStatus === 'Absent' ? 'declined' : 'waiting',
+                };
+            });
+
+            const boarded = passengersData.filter(p => p.boarding_status === 'confirmed').length;
+            const absentCount = passengersData.filter(p => p.boarding_status === 'declined').length;
             const elapsed = Math.round((Date.now() - tripStartTime.getTime()) / 60000);
 
             // End trip via Socket.IO
@@ -403,11 +422,6 @@ export default function DriverActiveNavigation() {
             }
 
             const auth = AuthStore.get();
-            const passengersData = passengers.map(p => ({
-                employee_id: p.id,
-                employee_name: p.name,
-                boarding_status: passengerStatuses[p.id] === 'Boarded' ? 'confirmed' : passengerStatuses[p.id] === 'Absent' ? 'declined' : 'waiting',
-            }));
 
             // Ensure navigation screen starts from a clean state when revisited.
             resetTripState();
@@ -447,8 +461,27 @@ export default function DriverActiveNavigation() {
                     style: 'destructive',
                     onPress: () => {
                         if (!route) return;
-                        const boarded = Object.values(BoardingStore.getAll()).filter(s => s === 'confirmed').length;
-                        const absentCount = Object.values(BoardingStore.getAll()).filter(s => s === 'declined').length;
+                        const boardingMap = BoardingStore.getAll();
+                        const passengersData = passengers.map(p => {
+                            const storeStatus = boardingMap[p.id];
+                            if (storeStatus === 'confirmed' || storeStatus === 'declined') {
+                                return {
+                                    employee_id: p.id,
+                                    employee_name: p.name,
+                                    boarding_status: storeStatus,
+                                };
+                            }
+
+                            const uiStatus = passengerStatuses[p.id];
+                            return {
+                                employee_id: p.id,
+                                employee_name: p.name,
+                                boarding_status: uiStatus === 'Boarded' ? 'confirmed' : uiStatus === 'Absent' ? 'declined' : 'waiting',
+                            };
+                        });
+
+                        const boarded = passengersData.filter(p => p.boarding_status === 'confirmed').length;
+                        const absentCount = passengersData.filter(p => p.boarding_status === 'declined').length;
                         const elapsed = Math.round((Date.now() - tripStartTime.getTime()) / 60000);
 
                         // End trip via Socket.IO
@@ -463,11 +496,6 @@ export default function DriverActiveNavigation() {
                         }
 
                         const auth = AuthStore.get();
-                        const passengersData = passengers.map(p => ({
-                            employee_id: p.id,
-                            employee_name: p.name,
-                            boarding_status: passengerStatuses[p.id] === 'Boarded' ? 'confirmed' : passengerStatuses[p.id] === 'Absent' ? 'declined' : 'waiting',
-                        }));
 
                         // Ensure navigation screen starts from a clean state when revisited.
                         resetTripState();
@@ -959,7 +987,6 @@ export default function DriverActiveNavigation() {
                             key={passenger.id}
                             name={passenger.name}
                             status={passengerStatuses[passenger.id] || 'Waiting'}
-                            avatar={`https://i.pravatar.cc/100?u=${passenger.id}`}
                             stopName={passenger.pickup_point ? getStopName(passenger.pickup_point) : 'Unknown Stop'}
                             selfConfirmed={selfConfirmedIds.has(passenger.id)}
                         />

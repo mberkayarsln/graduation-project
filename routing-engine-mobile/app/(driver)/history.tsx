@@ -1,7 +1,7 @@
-import React, { useState, useCallback } from 'react';
-import { View, Text, SafeAreaView, FlatList, ActivityIndicator, RefreshControl, TouchableOpacity, Alert } from 'react-native';
+import React, { useState, useCallback, useEffect } from 'react';
+import { View, Text, SafeAreaView, FlatList, ActivityIndicator, RefreshControl, Alert } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { useFocusEffect } from '@react-navigation/native';
+import { useFocusEffect } from 'expo-router';
 import { Colors } from '@/constants/colors';
 import { AuthStore } from '@/services/AuthStore';
 import { api } from '@/services/api';
@@ -96,22 +96,22 @@ function TripCard({ trip }: { trip: TripHistory }) {
                 }}
             >
                 <View style={{ flex: 1, alignItems: 'center' }}>
-                    <Text style={{ fontSize: 18, fontWeight: '800', color: Colors.primary }}>{boardingRate}%</Text>
+                    <Text style={{ fontSize: 15, fontWeight: '800', color: Colors.primary }}>{boardingRate}%</Text>
                     <Text style={{ fontSize: 11, color: Colors.textSecondary, marginTop: 2 }}>Boarding</Text>
                 </View>
                 <View style={{ width: 1, backgroundColor: Colors.border }} />
                 <View style={{ flex: 1, alignItems: 'center' }}>
-                    <Text style={{ fontSize: 18, fontWeight: '800', color: Colors.text }}>{trip.boarded_count}/{trip.total_passengers}</Text>
+                    <Text style={{ fontSize: 15, fontWeight: '800', color: Colors.text }}>{trip.boarded_count}/{trip.total_passengers}</Text>
                     <Text style={{ fontSize: 11, color: Colors.textSecondary, marginTop: 2 }}>Passengers</Text>
                 </View>
                 <View style={{ width: 1, backgroundColor: Colors.border }} />
                 <View style={{ flex: 1, alignItems: 'center' }}>
-                    <Text style={{ fontSize: 18, fontWeight: '800', color: Colors.text }}>{trip.distance_km} km</Text>
+                    <Text style={{ fontSize: 15, fontWeight: '800', color: Colors.text }}>{trip.distance_km} km</Text>
                     <Text style={{ fontSize: 11, color: Colors.textSecondary, marginTop: 2 }}>Distance</Text>
                 </View>
                 <View style={{ width: 1, backgroundColor: Colors.border }} />
                 <View style={{ flex: 1, alignItems: 'center' }}>
-                    <Text style={{ fontSize: 18, fontWeight: '800', color: Colors.text }}>{trip.duration_min}m</Text>
+                    <Text style={{ fontSize: 15, fontWeight: '800', color: Colors.text }}>{trip.duration_min}m</Text>
                     <Text style={{ fontSize: 11, color: Colors.textSecondary, marginTop: 2 }}>Duration</Text>
                 </View>
             </View>
@@ -128,10 +128,14 @@ export default function DriverHistory() {
         if (isRefresh) setRefreshing(true); else setLoading(true);
         try {
             const auth = AuthStore.get();
-            if (auth) {
-                const data = await api.getDriverTrips(auth.id);
-                setTrips(data);
+            const driverId = auth?.role === 'driver' ? (auth.vehicleId ?? auth.id) : null;
+            if (driverId == null) {
+                setTrips([]);
+                return;
             }
+
+            const data = await api.getDriverTrips(driverId);
+            setTrips(Array.isArray(data) ? data : []);
         } catch (err) {
             console.error('Failed to load driver trips:', err);
             Alert.alert('Connection Error', 'Could not load trip history. Please check your connection and try again.');
@@ -140,6 +144,10 @@ export default function DriverHistory() {
             setRefreshing(false);
         }
     }, []);
+
+    useEffect(() => {
+        loadTrips();
+    }, [loadTrips]);
 
     useFocusEffect(
         useCallback(() => {
