@@ -191,7 +191,7 @@ export default function CostReportPage() {
         {/* Print Header */}
         <div className="print-header">
           <h1>{t('rpt_header')}</h1>
-          <p className="print-date">{t('rpt_date')}: {new Date().toLocaleDateString('tr-TR', { year: 'numeric', month: 'long', day: 'numeric' })}</p>
+          <p className="print-date">{t('rpt_date')}: {new Date().toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' })}</p>
         </div>
 
         {/* System Stats */}
@@ -202,7 +202,7 @@ export default function CostReportPage() {
             { label: t('lbl_st_routes'), value: sys ? fmtInt(sys.route_count) : '--' },
             { label: t('lbl_st_daily_km'), value: sys ? fmt(sys.daily_km) : '--' },
             { label: t('lbl_st_monthly_km'), value: sys ? fmt(sys.monthly_km) : '--' },
-            { label: 'Aylik Sefer', value: sys ? fmtInt(sys.monthly_trip_count) : '--' },
+            { label: 'Monthly Trips', value: sys ? fmtInt(sys.monthly_trip_count) : '--' },
           ].map((s) => (
             <div key={s.label} className="stat-item"><span className="stat-label">{s.label}</span><span className="stat-value">{s.value}</span></div>
           ))}
@@ -220,21 +220,21 @@ export default function CostReportPage() {
                 { label: t('lbl_driver_salary'), key: 'driver_salary' },
                 { label: t('lbl_sgk'), key: 'sgk_rate', step: 0.1 },
                 { label: t('lbl_unemployment'), key: 'unemployment_rate', step: 0.1 },
-                { label: 'Yedek Surucu Orani (%)', key: 'reserve_driver_ratio', step: 0.1 },
-                { label: 'Arac Basina Surucu', key: 'drivers_per_vehicle', step: 0.1 },
+                { label: 'Reserve Driver Ratio (%)', key: 'reserve_driver_ratio', step: 0.1 },
+                { label: 'Drivers Per Vehicle', key: 'drivers_per_vehicle', step: 0.1 },
               ]} params={params} onChange={setParam} />
               <ParamGroup title={t('sect_vehicle')} items={[
                 { label: t('lbl_vehicle_rent'), key: 'vehicle_rent' },
                 { label: t('lbl_maintenance'), key: 'maintenance' },
                 { label: t('lbl_mtv'), key: 'mtv' },
-                { label: 'Sigorta (ay/arac)', key: 'insurance' },
-                { label: 'Lastik Gideri (ay/arac)', key: 'tyre' },
+                { label: 'Insurance (month/vehicle)', key: 'insurance' },
+                { label: 'Tyre Cost (month/vehicle)', key: 'tyre' },
               ]} params={params} onChange={setParam} />
               <ParamGroup title={t('sect_fuel')} items={[
                 { label: t('lbl_fuel_price'), key: 'fuel_price', step: 0.1 },
                 { label: t('lbl_fuel_consumption'), key: 'fuel_consumption', step: 0.1 },
-                { label: 'Kopru/Otoyol (gunluk)', key: 'toll_daily' },
-                { label: 'Diger Degisken (TL/km)', key: 'misc_variable_per_km', step: 0.01 },
+                { label: 'Bridge/Highway (daily)', key: 'toll_daily' },
+                { label: 'Other Variable (TL/km)', key: 'misc_variable_per_km', step: 0.01 },
               ]} params={params} onChange={setParam} />
               <ParamGroup title={t('sect_operation')} items={[
                 { label: t('lbl_working_days'), key: 'working_days' },
@@ -259,7 +259,7 @@ export default function CostReportPage() {
               { label: t('row_cost_per_emp'), value: `₺${fmt(ct.per_employee_monthly)}` },
               { label: t('row_cost_per_veh'), value: `₺${fmt(ct.per_vehicle_monthly)}` },
               { label: t('row_cost_per_km'), value: `₺${fmt(ct.per_km)}` },
-                { label: 'Sefer Basi', value: `₺${fmt(ct.per_trip)}` },
+                { label: 'Per Trip', value: `₺${fmt(ct.per_trip)}` },
               { label: t('row_contract_val'), value: `₺${fmt(ct.final_total)}` },
             ].map((s) => (
               <div key={s.label} className="stat-card"><span className="stat-label">{s.label}</span><span className="stat-value">{s.value}</span></div>
@@ -269,30 +269,30 @@ export default function CostReportPage() {
 
         {bd && (
           <div className="card" style={{ marginBottom: 20 }}>
-            <div className="card-header"><h2>Sabit / Değişken Gider Analizi</h2></div>
+            <div className="card-header"><h2>Fixed / Variable Cost Analysis</h2></div>
             <div className="card-body">
               <div className="table-container">
                 <table className="data-table cr-table">
                   <thead>
                     <tr>
-                      <th>Açıklama</th>
+                      <th>Description</th>
                       <th style={{ textAlign: 'right' }}>Tutar (₺)</th>
                       <th style={{ textAlign: 'right' }}>Pay (%)</th>
                     </tr>
                   </thead>
                   <tbody>
                     <tr>
-                      <td>Sabit Giderler (Personel + Araç)</td>
+                      <td>Fixed Costs (Personnel + Vehicle)</td>
                       <td style={{ textAlign: 'right' }}>₺{fmt(bd.fixed_total)}</td>
                       <td style={{ textAlign: 'right' }}>%{fmt(bd.fixed_share_pct)}</td>
                     </tr>
                     <tr>
-                      <td>Değişken Giderler (Yakıt + Geçiş + Diğer)</td>
+                      <td>Variable Costs (Fuel + Toll + Other)</td>
                       <td style={{ textAlign: 'right' }}>₺{fmt(bd.variable_total)}</td>
                       <td style={{ textAlign: 'right' }}>%{fmt(bd.variable_share_pct)}</td>
                     </tr>
                     <tr className="cr-subtotal-row">
-                      <td><strong>Toplam Operasyonel Alt Toplam</strong></td>
+                      <td><strong>Total Operational Subtotal</strong></td>
                       <td style={{ textAlign: 'right' }}><strong>₺{fmt(bd.subtotal)}</strong></td>
                       <td style={{ textAlign: 'right' }}><strong>%100,00</strong></td>
                     </tr>
@@ -320,24 +320,24 @@ export default function CostReportPage() {
                   </thead>
                   <tbody>
                     <SectionRow label={t('sect_personnel')} />
-                    <DataRow label={t('lbl_driver_salary')} unit={fmt(bd.driver.gross_salary)} qty={`${fmtInt(bd.driver.effective_driver_count)} sürücü`} total={bd.driver.gross_salary * bd.driver.effective_driver_count} />
-                    <DataRow label={t('lbl_sgk')} unit={fmt(bd.driver.sgk_per_driver)} qty={`${fmtInt(bd.driver.effective_driver_count)} sürücü`} total={bd.driver.sgk_per_driver * bd.driver.effective_driver_count} />
-                    <DataRow label={t('lbl_unemployment')} unit={fmt(bd.driver.unemployment_per_driver)} qty={`${fmtInt(bd.driver.effective_driver_count)} sürücü`} total={bd.driver.unemployment_per_driver * bd.driver.effective_driver_count} />
+                    <DataRow label={t('lbl_driver_salary')} unit={fmt(bd.driver.gross_salary)} qty={`${fmtInt(bd.driver.effective_driver_count)} drivers`} total={bd.driver.gross_salary * bd.driver.effective_driver_count} />
+                    <DataRow label={t('lbl_sgk')} unit={fmt(bd.driver.sgk_per_driver)} qty={`${fmtInt(bd.driver.effective_driver_count)} drivers`} total={bd.driver.sgk_per_driver * bd.driver.effective_driver_count} />
+                    <DataRow label={t('lbl_unemployment')} unit={fmt(bd.driver.unemployment_per_driver)} qty={`${fmtInt(bd.driver.effective_driver_count)} drivers`} total={bd.driver.unemployment_per_driver * bd.driver.effective_driver_count} />
                     <DataRow label={t('row_personnel_total')} total={bd.driver.total} bold />
 
                     <SectionRow label={t('sect_vehicle')} />
-                    <DataRow label={t('lbl_vehicle_rent')} unit={fmt(bd.vehicle.rent_per_vehicle)} qty={`${vc} araç`} total={bd.vehicle.rent_total} />
-                    <DataRow label={t('lbl_maintenance')} unit={fmt(bd.vehicle.maintenance_per_vehicle)} qty={`${vc} araç`} total={bd.vehicle.maintenance_total} />
-                    <DataRow label={t('lbl_mtv')} unit={fmt(bd.vehicle.mtv_per_vehicle)} qty={`${vc} araç`} total={bd.vehicle.mtv_total} />
-                    <DataRow label={'Sigorta'} unit={fmt(bd.vehicle.insurance_per_vehicle)} qty={`${vc} araç`} total={bd.vehicle.insurance_total} />
-                    <DataRow label={'Lastik'} unit={fmt(bd.vehicle.tyre_per_vehicle)} qty={`${vc} araç`} total={bd.vehicle.tyre_total} />
+                    <DataRow label={t('lbl_vehicle_rent')} unit={fmt(bd.vehicle.rent_per_vehicle)} qty={`${vc} vehicles`} total={bd.vehicle.rent_total} />
+                    <DataRow label={t('lbl_maintenance')} unit={fmt(bd.vehicle.maintenance_per_vehicle)} qty={`${vc} vehicles`} total={bd.vehicle.maintenance_total} />
+                    <DataRow label={t('lbl_mtv')} unit={fmt(bd.vehicle.mtv_per_vehicle)} qty={`${vc} vehicles`} total={bd.vehicle.mtv_total} />
+                    <DataRow label={'Insurance'} unit={fmt(bd.vehicle.insurance_per_vehicle)} qty={`${vc} vehicles`} total={bd.vehicle.insurance_total} />
+                    <DataRow label={'Tyre'} unit={fmt(bd.vehicle.tyre_per_vehicle)} qty={`${vc} vehicles`} total={bd.vehicle.tyre_total} />
                     <DataRow label={t('row_vehicle_total')} total={bd.vehicle.total} bold />
 
                     <SectionRow label={t('sect_fuel')} />
                     <DataRow label={t('row_fuel_monthly')} unit={`${fmt(bd.fuel.liters_monthly)} lt`} total={bd.fuel.total} />
-                    <DataRow label={'Köprü/Otoyol'} unit={`${fmt(data!.params.toll_daily)} ₺/gün`} qty={`${data!.params.working_days} gün`} total={bd.toll.total} />
-                    <DataRow label={'Diğer Değişken Gider'} unit={`${fmt(bd.misc_variable.per_km)} ₺/km`} qty={`${fmt(sys!.monthly_km)} km`} total={bd.misc_variable.total} />
-                    <DataRow label={'Toplam Değişken Gider'} total={bd.variable_total} bold />
+                    <DataRow label={'Bridge/Highway'} unit={`${fmt(data!.params.toll_daily)} ₺/day`} qty={`${data!.params.working_days} days`} total={bd.toll.total} />
+                    <DataRow label={'Other Variable Cost'} unit={`${fmt(bd.misc_variable.per_km)} ₺/km`} qty={`${fmt(sys!.monthly_km)} km`} total={bd.misc_variable.total} />
+                    <DataRow label={'Total Variable Cost'} total={bd.variable_total} bold />
 
                     <SectionRow label={t('sect_total_tax')} />
                     <DataRow label={t('row_subtotal')} total={bd.subtotal} bold />
@@ -363,7 +363,7 @@ export default function CostReportPage() {
                 <table className="data-table cr-table">
                   <thead>
                     <tr>
-                      <th style={{ width: '60%' }}>Açıklama</th>
+                      <th style={{ width: '60%' }}>Description</th>
                       <th style={{ width: '40%', textAlign: 'right' }}>Tutar (₺)</th>
                     </tr>
                   </thead>
@@ -377,7 +377,7 @@ export default function CostReportPage() {
                     <tr><td>{t('row_cost_per_emp')}</td><td style={{ textAlign: 'right' }}>₺{fmt(ct.per_employee_monthly)}</td></tr>
                     <tr><td>{t('row_cost_per_veh')}</td><td style={{ textAlign: 'right' }}>₺{fmt(ct.per_vehicle_monthly)}</td></tr>
                     <tr><td>{t('row_cost_per_km')}</td><td style={{ textAlign: 'right' }}>₺{fmt(ct.per_km)}</td></tr>
-                    <tr><td>Sefer başı maliyet</td><td style={{ textAlign: 'right' }}>₺{fmt(ct.per_trip)}</td></tr>
+                    <tr><td>Cost Per Trip</td><td style={{ textAlign: 'right' }}>₺{fmt(ct.per_trip)}</td></tr>
                   </tbody>
                 </table>
               </div>
@@ -387,35 +387,35 @@ export default function CostReportPage() {
 
         {sn && (
           <div className="card" style={{ marginTop: 20 }}>
-            <div className="card-header"><h2>Duyarlılık Analizi (What-if)</h2></div>
+            <div className="card-header"><h2>Sensitivity Analysis (What-if)</h2></div>
             <div className="card-body">
               <div className="table-container">
                 <table className="data-table cr-table">
                   <thead>
                     <tr>
-                      <th>Senaryo</th>
-                      <th style={{ textAlign: 'right' }}>Aylık Toplam (₺)</th>
-                      <th style={{ textAlign: 'right' }}>Baz Senaryo Farkı (₺)</th>
+                      <th>Scenario</th>
+                      <th style={{ textAlign: 'right' }}>Monthly Total (₺)</th>
+                      <th style={{ textAlign: 'right' }}>Base Scenario Delta (₺)</th>
                     </tr>
                   </thead>
                   <tbody>
                     <tr>
-                      <td>Baz Senaryo</td>
+                      <td>Base Scenario</td>
                       <td style={{ textAlign: 'right' }}>₺{fmt(sn.base_monthly)}</td>
                       <td style={{ textAlign: 'right' }}>₺0,00</td>
                     </tr>
                     <tr>
-                      <td>Yakıt +%10</td>
+                      <td>Fuel +10%</td>
                       <td style={{ textAlign: 'right' }}>₺{fmt(sn.fuel_plus_10)}</td>
                       <td style={{ textAlign: 'right' }}>₺{fmt(sn.fuel_delta)}</td>
                     </tr>
                     <tr>
-                      <td>Şoför Maliyeti +%10</td>
+                      <td>Driver Cost +10%</td>
                       <td style={{ textAlign: 'right' }}>₺{fmt(sn.salary_plus_10)}</td>
                       <td style={{ textAlign: 'right' }}>₺{fmt(sn.salary_delta)}</td>
                     </tr>
                     <tr>
-                      <td>Kilometre +%10</td>
+                      <td>Kilometers +10%</td>
                       <td style={{ textAlign: 'right' }}>₺{fmt(sn.km_plus_10)}</td>
                       <td style={{ textAlign: 'right' }}>₺{fmt(sn.km_delta)}</td>
                     </tr>
