@@ -51,6 +51,8 @@ trip_history_repo = TripHistoryRepository(db)
 _transit_stops_cache: list[tuple[float, float]] | None = None
 _transit_stop_names_cache: dict[tuple[float, float], str] | None = None
 _bus_stops_cache: dict[int, list] = {}  # cluster_id -> bus_stops along route
+# True when city changed and next generate-routes call must regenerate employees.
+_city_change_requires_regeneration: bool = False
 
 CITY_PRESETS: dict[str, dict] = {
     "istanbul_anadolu": {
@@ -95,6 +97,7 @@ def _infer_city_from_config() -> str:
 
 
 def _apply_city_config(city: str) -> tuple[bool, str]:
+    global _city_change_requires_regeneration
     city_key = (city or '').strip().lower()
     if city_key == 'istanbul':
         city_key = 'istanbul_anadolu'
@@ -113,8 +116,12 @@ def _apply_city_config(city: str) -> tuple[bool, str]:
     Config.OFFICE_LOCATION = tuple(preset['office_location'])
     Config.OSM_FILE = osm_file
     # If city changed, force first run to regenerate employees for the new city.
-    # If city is the same, reuse DB data to avoid unnecessary regeneration.
-    Config.LOAD_ALL_FROM_DB = not city_changed
+    # Keep this requirement until one generate-routes run finishes.
+    if city_changed:
+        _city_change_requires_regeneration = True
+
+    # If city is unchanged and no pending regeneration exists, reuse DB data.
+    Config.LOAD_ALL_FROM_DB = not _city_change_requires_regeneration
 
     if city_changed:
         _clear_osm_caches()
@@ -389,6 +396,7 @@ def api_update_city_config():
 def api_generate_routes():
     """Trigger route generation. Accepts optional JSON body: { "mode": "budget"|"balanced"|"employee" }"""
     try:
+        global _city_change_requires_regeneration
         from config import Config
         from services import ServicePlanner
         
@@ -400,6 +408,11 @@ def api_generate_routes():
         # Run route generation with selected mode
         planner = ServicePlanner(Config)
         planner.run(optimization_mode=mode)
+
+        # City switch regeneration completed; subsequent runs can reuse DB.
+        if _city_change_requires_regeneration:
+            _city_change_requires_regeneration = False
+            Config.LOAD_ALL_FROM_DB = True
         
         # Return updated stats
         employees = employee_repo.find_all()
