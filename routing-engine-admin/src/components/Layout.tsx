@@ -2,6 +2,7 @@ import { NavLink, Outlet } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { useState } from 'react';
 import ToastContainer from './Toast';
+import { useCity } from '../context/CityContext';
 
 const navItems = [
   { path: '/', icon: 'ti-layout-dashboard', key: 'nav_dashboard' },
@@ -15,6 +16,7 @@ const navItems = [
 export default function Layout() {
   const { t } = useTranslation();
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const { city, setCity } = useCity();
 
   return (
     <div className={`page-wrapper${sidebarOpen ? ' sidebar-open' : ''}`} id="main-wrapper">
@@ -28,6 +30,20 @@ export default function Layout() {
             <button className="sidebar-close d-xl-none" onClick={() => setSidebarOpen(false)}>
               <i className="ti ti-x" />
             </button>
+          </div>
+
+          <div className="sidebar-city">
+            <label htmlFor="city-select" className="sidebar-city-label">City</label>
+            <select
+              id="city-select"
+              className="sidebar-city-select"
+              value={city}
+              onChange={(e) => setCity(e.target.value as 'istanbul_anadolu' | 'istanbul_avrupa' | 'ankara')}
+            >
+              <option value="istanbul_anadolu">Istanbul Anadolu</option>
+              <option value="istanbul_avrupa">Istanbul Avrupa</option>
+              <option value="ankara">Ankara</option>
+            </select>
           </div>
 
           <nav className="sidebar-nav">

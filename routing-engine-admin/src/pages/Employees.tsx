@@ -5,8 +5,7 @@ import { employeesApi } from '../services/api';
 import type { Employee } from '../services/api';
 import { showToast } from '../utils/toast';
 import SkeletonLoader from '../components/SkeletonLoader';
-
-const OFFICE = [40.837384, 29.412109] as [number, number];
+import { useCity } from '../context/CityContext';
 
 export default function Employees() {
   const { t } = useTranslation();
@@ -20,14 +19,16 @@ export default function Employees() {
   const mapContainerRef = useRef<HTMLDivElement>(null);
   const markerLayerRef = useRef<L.LayerGroup | null>(null);
   const markersRef = useRef<Record<number, L.Marker>>({});
+  const officeMarkerRef = useRef<L.Marker | null>(null);
+  const { cityConfig } = useCity();
 
   const initMap = useCallback(() => {
     if (mapRef.current || !mapContainerRef.current) return;
-    const map = L.map(mapContainerRef.current).setView([40.95, 29.2], 11);
+    const map = L.map(mapContainerRef.current).setView(cityConfig.mapCenter, cityConfig.zoom);
     L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png', {
       attribution: '&copy; OpenStreetMap, &copy; CARTO',
     }).addTo(map);
-    L.marker(OFFICE, {
+    officeMarkerRef.current = L.marker(cityConfig.office, {
       icon: L.divIcon({
         className: 'office-marker',
         html: `<div style="background:#3699ff;width:20px;height:20px;border-radius:6px;border:1px solid #fff;display:flex;align-items:center;justify-content:center;"><svg width="12" height="12" viewBox="0 0 24 24" fill="white"><path d="M12 7V3H2v18h20V7H12zM6 19H4v-2h2v2zm0-4H4v-2h2v2zm0-4H4V9h2v2zm0-4H4V5h2v2zm4 12H8v-2h2v2zm0-4H8v-2h2v2zm0-4H8V9h2v2zm0-4H8V5h2v2zm10 12h-8v-2h2v-2h-2v-2h2v-2h-2V9h8v10zm-2-8h-2v2h2v-2zm0 4h-2v2h2v-2z"/></svg></div>`,
@@ -36,7 +37,7 @@ export default function Employees() {
     }).addTo(map).bindPopup(`<b>${t('office')}</b>`);
     markerLayerRef.current = L.layerGroup().addTo(map);
     mapRef.current = map;
-  }, [t]);
+  }, [cityConfig, t]);
 
   const renderMarkers = useCallback(() => {
     if (!markerLayerRef.current) return;
@@ -84,6 +85,13 @@ export default function Employees() {
     initMap();
     employeesApi.getAll().then(data => { setEmployees(data); setLoading(false); }).catch(() => { showToast(t('msg_err_emp'), 'error'); setLoading(false); });
   }, [initMap, t]);
+
+  useEffect(() => {
+    if (!mapRef.current) return;
+    mapRef.current.setView(cityConfig.mapCenter, cityConfig.zoom);
+    officeMarkerRef.current?.setLatLng(cityConfig.office);
+  }, [cityConfig]);
+
   useEffect(() => { renderMarkers(); }, [renderMarkers]);
 
   const filtered = employees.filter((e) => {

@@ -7,21 +7,24 @@ import RoutesPage from './pages/Routes';
 import RouteEdit from './pages/RouteEdit';
 import Vehicles from './pages/Vehicles';
 import CostReport from './pages/CostReport';
+import { CityProvider } from './context/CityContext';
 
 export default function App() {
   return (
-    <BrowserRouter>
-      <Routes>
-        <Route element={<Layout />}>
-          <Route path="/" element={<Dashboard />} />
-          <Route path="/employees" element={<Employees />} />
-          <Route path="/clusters" element={<Clusters />} />
-          <Route path="/routes" element={<RoutesPage />} />
-          <Route path="/routes/edit" element={<RouteEdit />} />
-          <Route path="/vehicles" element={<Vehicles />} />
-          <Route path="/cost-report" element={<CostReport />} />
-        </Route>
-      </Routes>
-    </BrowserRouter>
+    <CityProvider>
+      <BrowserRouter>
+        <Routes>
+          <Route element={<Layout />}>
+            <Route path="/" element={<Dashboard />} />
+            <Route path="/employees" element={<Employees />} />
+            <Route path="/clusters" element={<Clusters />} />
+            <Route path="/routes" element={<RoutesPage />} />
+            <Route path="/routes/edit" element={<RouteEdit />} />
+            <Route path="/vehicles" element={<Vehicles />} />
+            <Route path="/cost-report" element={<CostReport />} />
+          </Route>
+        </Routes>
+      </BrowserRouter>
+    </CityProvider>
   );
 }

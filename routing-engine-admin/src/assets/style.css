@@ -139,6 +139,29 @@ body {
     padding: 4px 8px 28px;
 }
 
+.sidebar-city {
+    padding: 0 8px 16px;
+}
+
+.sidebar-city-label {
+    display: block;
+    font-size: 12px;
+    color: var(--text-secondary);
+    font-weight: 600;
+    margin-bottom: 6px;
+}
+
+.sidebar-city-select {
+    width: 100%;
+    border: 1px solid var(--border-color);
+    border-radius: 10px;
+    padding: 8px 10px;
+    background: #fff;
+    color: var(--text-primary);
+    font-size: 13px;
+    font-weight: 600;
+}
+
 .logo {
     display: inline-flex;
     align-items: center;

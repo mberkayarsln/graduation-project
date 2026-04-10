@@ -27,6 +27,7 @@ from db.repositories import (
     ZoneRepository, EmployeeRepository, ClusterRepository,
     RouteRepository, VehicleRepository, TripHistoryRepository
 )
+from config import Config
 
 # Path to React SPA build output
 SPA_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), '..', 'routing-engine-admin', 'dist')
@@ -51,12 +52,81 @@ _transit_stops_cache: list[tuple[float, float]] | None = None
 _transit_stop_names_cache: dict[tuple[float, float], str] | None = None
 _bus_stops_cache: dict[int, list] = {}  # cluster_id -> bus_stops along route
 
+CITY_PRESETS: dict[str, dict] = {
+    "istanbul_anadolu": {
+        "office_location": (40.837384, 29.412109),
+        "osm_file": "data/istanbul-anatolian.osm.pbf",
+    },
+    "istanbul_avrupa": {
+        "office_location": (41.10773366862954, 29.032271965999033),
+        "osm_file": "data/istanbul-center.osm.pbf",
+    },
+    "ankara": {
+        "office_location": (39.910180932947206, 32.80887467021701),
+        "osm_file": "data/ankara-latest.osm.pbf",
+    },
+}
+
+
+def _resolve_osm_abs_path(osm_file: str) -> str:
+    root_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    return os.path.join(root_dir, osm_file)
+
+
+def _clear_osm_caches() -> None:
+    global _transit_stops_cache, _transit_stop_names_cache, _bus_stops_cache
+    _transit_stops_cache = None
+    _transit_stop_names_cache = None
+    _bus_stops_cache = {}
+    if hasattr(api_stop_names, '_grid'):
+        delattr(api_stop_names, '_grid')
+
+
+def _infer_city_from_config() -> str:
+    osm = getattr(Config, 'OSM_FILE', '')
+    osm_l = osm.lower()
+    if 'ankara' in osm_l:
+        return 'ankara'
+    if 'anatolian' in osm_l:
+        return 'istanbul_anadolu'
+    if 'center' in osm_l or 'avrupa' in osm_l or 'europe' in osm_l:
+        return 'istanbul_avrupa'
+    return 'istanbul_anadolu'
+
+
+def _apply_city_config(city: str) -> tuple[bool, str]:
+    city_key = (city or '').strip().lower()
+    if city_key == 'istanbul':
+        city_key = 'istanbul_anadolu'
+
+    preset = CITY_PRESETS.get(city_key)
+    if not preset:
+        return False, 'Invalid city. Allowed values: istanbul_anadolu, istanbul_avrupa, ankara'
+
+    osm_file = preset['osm_file']
+    if not os.path.exists(_resolve_osm_abs_path(osm_file)):
+        return False, f'OSM file not found: {osm_file}'
+
+    current_city = _infer_city_from_config()
+    city_changed = current_city != city_key
+
+    Config.OFFICE_LOCATION = tuple(preset['office_location'])
+    Config.OSM_FILE = osm_file
+    # If city changed, force first run to regenerate employees for the new city.
+    # If city is the same, reuse DB data to avoid unnecessary regeneration.
+    Config.LOAD_ALL_FROM_DB = not city_changed
+
+    if city_changed:
+        _clear_osm_caches()
+        _warm_caches()
+    return True, 'ok'
+
 
 def _get_transit_stops_cached() -> list[tuple[float, float]]:
     global _transit_stops_cache
     if _transit_stops_cache is None:
         from utils import DataGenerator
-        data_gen = DataGenerator()
+        data_gen = DataGenerator(osm_file=Config.OSM_FILE)
         _transit_stops_cache = data_gen.get_transit_stops()
     return _transit_stops_cache
 
@@ -65,7 +135,7 @@ def _get_transit_stop_names_cached() -> dict[tuple[float, float], str]:
     global _transit_stop_names_cache
     if _transit_stop_names_cache is None:
         from utils import DataGenerator
-        data_gen = DataGenerator()
+        data_gen = DataGenerator(osm_file=Config.OSM_FILE)
         _transit_stop_names_cache = data_gen.get_transit_stops_with_names()
     return _transit_stop_names_cache
 
@@ -276,11 +346,43 @@ def api_stats():
 @app.route('/api/optimization-mode', methods=['GET'])
 def api_get_optimization_mode():
     """Get current optimization mode and available presets."""
-    from config import Config
     return jsonify({
         'current_mode': getattr(Config, 'OPTIMIZATION_MODE', 'balanced'),
         'presets': Config.OPTIMIZATION_PRESETS
     })
+
+
+@app.route('/api/city-config', methods=['GET'])
+def api_get_city_config():
+    """Get currently active city settings used by backend route generation."""
+    return jsonify({
+        'city': _infer_city_from_config(),
+        'office_location': list(Config.OFFICE_LOCATION),
+        'osm_file': Config.OSM_FILE,
+        'load_all_from_db': Config.LOAD_ALL_FROM_DB,
+        'available_cities': list(CITY_PRESETS.keys()),
+    })
+
+
+@app.route('/api/city-config', methods=['PUT'])
+def api_update_city_config():
+    """Update active city settings (office + OSM file) for backend operations."""
+    try:
+        data = request.json or {}
+        city = data.get('city', '')
+        ok, message = _apply_city_config(city)
+        if not ok:
+            return jsonify({'success': False, 'error': message}), 400
+
+        return jsonify({
+            'success': True,
+            'city': _infer_city_from_config(),
+            'office_location': list(Config.OFFICE_LOCATION),
+            'osm_file': Config.OSM_FILE,
+            'load_all_from_db': Config.LOAD_ALL_FROM_DB,
+        })
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
 
 
 @app.route('/api/generate-routes', methods=['POST'])
@@ -694,9 +796,8 @@ def api_update_route(cluster_id):
         if cluster and cluster.employees and route.coordinates:
             # Load transit stops (bus stops) for proper matching
             from utils import DataGenerator
-            data_gen = DataGenerator()
+            data_gen = DataGenerator(osm_file=Config.OSM_FILE)
             safe_stops = data_gen.get_transit_stops()
-            from config import Config
             
             # Find all bus stops along the new route
             discovery_buffer = getattr(Config, 'BUS_STOP_DISCOVERY_BUFFER_METERS', 150)

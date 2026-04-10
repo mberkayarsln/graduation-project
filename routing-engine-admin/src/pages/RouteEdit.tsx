@@ -6,8 +6,8 @@ import 'leaflet-routing-machine';
 import { routesApi, clustersApi } from '../services/api';
 import type { Route } from '../services/api';
 import { showToast } from '../utils/toast';
+import { useCity } from '../context/CityContext';
 
-const OFFICE = [40.837384, 29.412109] as [number, number];
 const COLORS = ['#FF6B6B', '#4ECDC4', '#45B7D1', '#96CEB4', '#FFEAA7', '#DDA0DD', '#98D8C8', '#F7DC6F', '#FF9FF3', '#54A0FF'];
 
 export default function RouteEditPage() {
@@ -27,14 +27,16 @@ export default function RouteEditPage() {
   const originalWaypointsRef = useRef<L.LatLng[]>([]);
   const empMarkersRef = useRef<L.Marker[]>([]);
   const lastRouteRef = useRef<L.Routing.IRoute | null>(null);
+  const officeMarkerRef = useRef<L.Marker | null>(null);
+  const { cityConfig } = useCity();
 
   const initMap = useCallback(() => {
     if (mapRef.current || !mapContainerRef.current) return;
-    const map = L.map(mapContainerRef.current).setView([40.95, 29.2], 11);
+    const map = L.map(mapContainerRef.current).setView(cityConfig.mapCenter, cityConfig.zoom);
     L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png', {
       attribution: '&copy; OpenStreetMap, &copy; CARTO',
     }).addTo(map);
-    L.marker(OFFICE, {
+    officeMarkerRef.current = L.marker(cityConfig.office, {
       icon: L.divIcon({
         className: 'office-icon',
         html: '<div style="background:#6366f1;width:14px;height:14px;border-radius:50%;border:2px solid #fff;"></div>',
@@ -42,7 +44,7 @@ export default function RouteEditPage() {
       }),
     }).addTo(map).bindPopup(`<b>${t('office')}</b>`);
     mapRef.current = map;
-  }, [t]);
+  }, [cityConfig, t]);
 
   const loadRouteForEdit = useCallback(async (index: number) => {
     if (!mapRef.current || index < 0 || index >= routes.length) return;
@@ -68,7 +70,7 @@ export default function RouteEditPage() {
       showAlternatives: false,
       lineOptions: { styles: [{ color, opacity: 0.9, weight: 6 }], extendToWaypoints: true, missingRouteTolerance: 0 },
       createMarker(i: number, waypoint: { latLng: L.LatLng }) {
-        const isOffice = Math.abs(waypoint.latLng.lat - OFFICE[0]) < 0.001 && Math.abs(waypoint.latLng.lng - OFFICE[1]) < 0.001;
+        const isOffice = Math.abs(waypoint.latLng.lat - cityConfig.office[0]) < 0.001 && Math.abs(waypoint.latLng.lng - cityConfig.office[1]) < 0.001;
         if (isOffice) {
           return L.marker(waypoint.latLng, {
             draggable: true,
@@ -116,7 +118,7 @@ export default function RouteEditPage() {
         empMarkersRef.current.push(marker);
       });
     } catch { /* ignore */ }
-  }, [routes]);
+  }, [cityConfig.office, routes]);
 
   const addWaypoint = () => {
     if (!routingRef.current || !mapRef.current) return;
@@ -176,6 +178,12 @@ export default function RouteEditPage() {
   };
 
   useEffect(() => { initMap(); }, [initMap]);
+
+  useEffect(() => {
+    if (!mapRef.current) return;
+    mapRef.current.setView(cityConfig.mapCenter, cityConfig.zoom);
+    officeMarkerRef.current?.setLatLng(cityConfig.office);
+  }, [cityConfig]);
 
   useEffect(() => {
     routesApi.getAll().then((data) => {

@@ -4,9 +4,9 @@ import L from 'leaflet';
 import { routesApi, clustersApi, getStopNames } from '../services/api';
 import type { Route } from '../services/api';
 import SkeletonLoader from '../components/SkeletonLoader';
+import { useCity } from '../context/CityContext';
 
 
-const OFFICE = [40.837384, 29.412109] as [number, number];
 const COLORS = ['#FF6B6B', '#4ECDC4', '#45B7D1', '#96CEB4', '#FFEAA7', '#DDA0DD', '#98D8C8', '#F7DC6F', '#FF9FF3', '#54A0FF'];
 
 export default function RoutesPage() {
@@ -20,18 +20,20 @@ export default function RoutesPage() {
   const mapContainerRef = useRef<HTMLDivElement>(null);
   const currentLayerRef = useRef<L.LayerGroup | null>(null);
   const bgPolylinesRef = useRef<L.Polyline[]>([]);
+  const officeMarkerRef = useRef<L.Marker | null>(null);
+  const { cityConfig } = useCity();
 
   const initMap = useCallback(() => {
     if (mapRef.current || !mapContainerRef.current) return;
-    const map = L.map(mapContainerRef.current).setView([40.95, 29.2], 11);
+    const map = L.map(mapContainerRef.current).setView(cityConfig.mapCenter, cityConfig.zoom);
     L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png', {
       attribution: '&copy; OpenStreetMap, &copy; CARTO',
     }).addTo(map);
-    L.marker(OFFICE, {
+    officeMarkerRef.current = L.marker(cityConfig.office, {
       icon: L.divIcon({ className: 'office-icon', html: '<div style="background:#6366f1;width:12px;height:12px;border-radius:50%;border:2px solid #fff;"></div>', iconSize: [12, 12] }),
     }).addTo(map).bindPopup(`<b>${t('office')}</b>`);
     mapRef.current = map;
-  }, [t]);
+  }, [cityConfig, t]);
 
   const renderBgPolylines = useCallback(() => {
     if (!mapRef.current) return;
@@ -125,6 +127,11 @@ export default function RoutesPage() {
   }, [routes, selectRoute]);
 
   useEffect(() => { initMap(); loadRoutes(); }, [initMap, loadRoutes]);
+  useEffect(() => {
+    if (!mapRef.current) return;
+    mapRef.current.setView(cityConfig.mapCenter, cityConfig.zoom);
+    officeMarkerRef.current?.setLatLng(cityConfig.office);
+  }, [cityConfig]);
   useEffect(() => { renderBgPolylines(); }, [renderBgPolylines]);
 
   return (

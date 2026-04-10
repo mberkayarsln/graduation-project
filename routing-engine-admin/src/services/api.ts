@@ -175,6 +175,22 @@ export interface CostReportData {
   };
 }
 
+export interface CityConfigResponse {
+  city: 'istanbul_anadolu' | 'istanbul_avrupa' | 'ankara';
+  office_location: [number, number];
+  osm_file: string;
+  load_all_from_db: boolean;
+  available_cities: string[];
+}
+
+export interface CityConfigUpdateResponse {
+  success: boolean;
+  city: 'istanbul_anadolu' | 'istanbul_avrupa' | 'ankara';
+  office_location: [number, number];
+  osm_file: string;
+  load_all_from_db: boolean;
+}
+
 // ── API functions ──
 
 export const statsApi = {
@@ -212,6 +228,12 @@ export const generateRoutes = (mode: string) =>
 
 export const getOptimizationMode = () =>
   api.get<{ current_mode: string; presets: Record<string, unknown> }>('/api/optimization-mode');
+
+export const getCityConfig = () =>
+  api.get<CityConfigResponse>('/api/city-config');
+
+export const updateCityConfig = (city: 'istanbul_anadolu' | 'istanbul_avrupa' | 'ankara') =>
+  api.put<CityConfigUpdateResponse>('/api/city-config', { city });
 
 export const getStopNames = (coordinates: [number, number][]) =>
   api.post<Record<string, string>>('/api/stops/names', { coordinates });

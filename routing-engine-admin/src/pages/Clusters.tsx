@@ -4,8 +4,7 @@ import L from 'leaflet';
 import { clustersApi } from '../services/api';
 import type { Cluster } from '../services/api';
 import SkeletonLoader from '../components/SkeletonLoader';
-
-const OFFICE = [40.837384, 29.412109] as [number, number];
+import { useCity } from '../context/CityContext';
 
 export default function Clusters() {
   const { t } = useTranslation();
@@ -15,14 +14,16 @@ export default function Clusters() {
   const mapRef = useRef<L.Map | null>(null);
   const mapContainerRef = useRef<HTMLDivElement>(null);
   const layerRef = useRef<L.LayerGroup | null>(null);
+  const officeMarkerRef = useRef<L.Marker | null>(null);
+  const { cityConfig } = useCity();
 
   const initMap = useCallback(() => {
     if (mapRef.current || !mapContainerRef.current) return;
-    const map = L.map(mapContainerRef.current).setView([40.95, 29.2], 11);
+    const map = L.map(mapContainerRef.current).setView(cityConfig.mapCenter, cityConfig.zoom);
     L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png', {
       attribution: '&copy; OpenStreetMap, &copy; CARTO',
     }).addTo(map);
-    L.marker(OFFICE, {
+    officeMarkerRef.current = L.marker(cityConfig.office, {
       icon: L.divIcon({
         className: 'office-icon',
         html: '<div style="background:#6366f1;width:14px;height:14px;border-radius:50%;border:2px solid #fff;"></div>',
@@ -31,7 +32,7 @@ export default function Clusters() {
     }).addTo(map).bindPopup(`<b>${t('office')}</b>`);
     layerRef.current = L.layerGroup().addTo(map);
     mapRef.current = map;
-  }, [t]);
+  }, [cityConfig, t]);
 
   const loadClusters = useCallback(async () => {
     setLoading(true);
@@ -106,6 +107,13 @@ export default function Clusters() {
     initMap();
     clustersApi.getAll().then(data => { setClusters(data); setLoading(false); }).catch(() => { console.error('Error loading clusters'); setLoading(false); });
   }, [initMap]);
+
+  useEffect(() => {
+    if (!mapRef.current) return;
+    mapRef.current.setView(cityConfig.mapCenter, cityConfig.zoom);
+    officeMarkerRef.current?.setLatLng(cityConfig.office);
+  }, [cityConfig]);
+
   useEffect(() => { if (selectedIdx < 0) renderAllOnMap(); }, [renderAllOnMap, selectedIdx]);
 
   return (

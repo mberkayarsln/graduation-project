@@ -5,8 +5,8 @@ import { statsApi, routesApi, generateRoutes, getOptimizationMode } from '../ser
 import type { Stats, Route } from '../services/api';
 import { showToast } from '../utils/toast';
 import SkeletonLoader from '../components/SkeletonLoader';
+import { useCity } from '../context/CityContext';
 
-const OFFICE = [40.837384, 29.412109] as [number, number];
 const COLORS = ['#FF6B6B', '#4ECDC4', '#45B7D1', '#96CEB4', '#FFEAA7', '#DDA0DD', '#98D8C8', '#F7DC6F'];
 
 export default function Dashboard() {
@@ -14,13 +14,15 @@ export default function Dashboard() {
   const mapRef = useRef<L.Map | null>(null);
   const mapContainerRef = useRef<HTMLDivElement>(null);
   const routeLayerRef = useRef<L.LayerGroup | null>(null);
+  const officeMarkerRef = useRef<L.Marker | null>(null);
   const [stats, setStats] = useState<Stats | null>(null);
   const [mode, setMode] = useState('balanced');
   const [generating, setGenerating] = useState(false);
+  const { cityConfig } = useCity();
 
   const initMap = useCallback(() => {
     if (mapRef.current || !mapContainerRef.current) return;
-    const map = L.map(mapContainerRef.current).setView([40.95, 29.2], 11);
+    const map = L.map(mapContainerRef.current).setView(cityConfig.mapCenter, cityConfig.zoom);
     L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png', {
       attribution: '&copy; OpenStreetMap, &copy; CARTO',
     }).addTo(map);
@@ -33,11 +35,11 @@ export default function Dashboard() {
       iconSize: [20, 20],
       iconAnchor: [10, 10],
     });
-    L.marker(OFFICE, { icon: officeIcon }).addTo(map).bindPopup(`<b>${t('office')}</b>`);
+    officeMarkerRef.current = L.marker(cityConfig.office, { icon: officeIcon }).addTo(map).bindPopup(`<b>${t('office')}</b>`);
 
     routeLayerRef.current = L.layerGroup().addTo(map);
     mapRef.current = map;
-  }, [t]);
+  }, [cityConfig, t]);
 
   const loadRoutes = useCallback(async () => {
     if (!routeLayerRef.current) return;
@@ -99,6 +101,12 @@ export default function Dashboard() {
     refreshStats();
     getOptimizationMode().then((data) => setMode(data.current_mode)).catch(() => {});
   }, [initMap, refreshStats]);
+
+  useEffect(() => {
+    if (!mapRef.current) return;
+    mapRef.current.setView(cityConfig.mapCenter, cityConfig.zoom);
+    officeMarkerRef.current?.setLatLng(cityConfig.office);
+  }, [cityConfig]);
 
   const efficiency = stats && stats.active_employees > 0
     ? (((stats.active_employees - stats.unassigned_employees) / stats.active_employees) * 100).toFixed(1) + '%'
